@@ -46,9 +46,10 @@ reads text, never audio, and runs where the operator's subscription runs.
   The book is the home; chat tools, docs tools and Markdown are exports the
   operator runs when wanted. No chat integration in v1.
 - **Brain**: a Claude Code session in THIS repo, on subscription. It arms the
-  harness **Monitor** (`ws:` source) on the events socket and re-arms every
-  30 minutes; each paragraph event is a notification; it writes the book
-  through the CLI. `/loop` is the fallback when Monitor is unavailable.
+  harness **Monitor** (`ws:` source) on the events socket with `ACTA_TOKEN`
+  and re-arms every 30 minutes; each paragraph event is a notification; it
+  writes the book through the CLI. `/loop` is the fallback when Monitor is
+  unavailable.
   Metered models (AI Gateway) only where a session is too slow: live
   caption translation, utterance tagging. Neither is v1.
 - **CLI** (`cli/`, incur): `acta new` (mints the meeting and prints the
@@ -106,7 +107,12 @@ a real meeting.
 - **Bun-first**, TypeScript, zod at every boundary (webhooks, agent events,
   env). Never `as X` on I/O.
 - **Hono** on the Worker, one Durable Object class, R2 and AI bindings
-  (`wrangler.jsonc`). Secrets via `wrangler secret put`, never in vars.
+  (`wrangler.jsonc`). Two secrets via `wrangler secret put`, never in vars:
+  `RTK_API_TOKEN` (Realtime Admin) and `ACTA_TOKEN` (the one operator
+  bearer for CLI, brain and events socket). Webhooks carry an RSA signature
+  against RealtimeKit's published key; there is no webhook secret. The room
+  link is a capability (`/m/<id>?k=…`); Access, when configured, is
+  verified on top. The exact shapes are in `docs/V0.md`.
 - **Web**: the prebuilt RealtimeKit component is the one earned dependency.
   Everything around it (the book pane, the join gate) is plain and small.
 - **Tests** run `TZ=UTC bun test`. An instant is UTC; a day is local.

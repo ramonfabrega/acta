@@ -33,10 +33,13 @@ created by API; 26 agent frames for 5 finals in 18 s of speech.
       RTK_API_TOKEN` from there.
 - [x] Presets: `human` with `permissions.transcription_enabled: true`;
       `agent` with `permissions.hidden_participant: true` and no media.
-- [ ] Webhook pointing at `https://<hostname>/hooks/rtk`, secret as
-      `WEBHOOK_SECRET`. Subscribe to meeting, participant, recording and
-      transcript events.
-- [ ] R2 bucket named as in `wrangler.jsonc`.
+- [ ] Webhook pointing at `https://<hostname>/hooks/rtk` (`bun run setup`
+      registers it). No secret: RealtimeKit signs with RSA-SHA256 and
+      publishes the key at `api.realtime.cloudflare.com/.well-known/webhooks.json`.
+- [x] R2 bucket `acta-meetings` (created 2026-10-23).
+- [ ] `ACTA_TOKEN` (`openssl rand -hex 32`, kept in passage at
+      `tokens/cloudflare/personal/acta/acta-token`) as a secret, and in the
+      brain's environment for the CLI.
 - [ ] Cloudflare Access application on the hostname, your identity provider,
       a policy allowlisting the participants' emails. Put the team domain
       and AUD in vars; the Worker verifies the JWT and uses the email as
@@ -60,7 +63,7 @@ created by API; 26 agent frames for 5 finals in 18 s of speech.
    the book's transcript section, and emits one frame per closed paragraph
    on `/m/<id>/events`.
 5. The brain, a Claude Code session in this repo started before the
-   meeting, has armed Monitor on the events socket with the `EVENTS_TOKEN`.
+   meeting, has armed Monitor on the events socket with the `ACTA_TOKEN`.
    Each frame is a notification; it writes notes, decisions and action items
    into the book through `acta book put`; the room sees them land.
 6. Last human leaves. Scribe closes the agent, writes `utterances.jsonl` to
