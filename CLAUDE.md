@@ -13,7 +13,9 @@ is built to (routes, shapes, the paragraph machine, vendor facts measured
 live); `docs/SPIKE.md` is the log of the first evening; `docs/MEETING1.md`
 the log of the first live meeting (what broke, with mechanisms); `docs/DESIGN.md` the
 decisions and what they beat; `docs/BRAIN.md` the runbook for the session
-that runs a meeting. v0 is deployed; see README for the loop.
+that runs a meeting; `docs/BATCH.md` the plan for the batch pass (Whisper
+on Workers AI, Parakeet locally) and the cost table it completes. v0 is
+deployed; see README for the loop.
 
 ## Thesis
 
