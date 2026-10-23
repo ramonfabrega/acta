@@ -585,7 +585,7 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
         if (this.state === "idle") this.setState("live");
         this.emit({ type: "started", sessionId: s.id, at: now });
         this.log("session.started", { sessionId: s.id });
-        await this.maybeStartRecording();
+        void this.maybeStartRecording();
         return;
       }
       case "session.ended": {
@@ -607,7 +607,7 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
         } else {
           this.log("participant.rejoin", { peerId: p.peer_id }); // a failed first attempt, same peer
         }
-        await this.maybeStartRecording();
+        void this.maybeStartRecording();
         await this.arm();
         return;
       }
@@ -652,9 +652,12 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     const first = this.firstPartial.get(sp.peer_id);
     this.firstPartial.delete(sp.peer_id);
     const text = d.text.trim();
+    // Never await before the insert: a second final would land first and
+    // break the JSONL's t1 order (seen live 2026-10-23). The start call
+    // guards its own concurrency and logs its own failures.
     if (text && this.participant(sp.peer_id)?.present_at == null) {
       this.markPresent(sp.peer_id, now);
-      await this.maybeStartRecording();
+      void this.maybeStartRecording();
     }
     const t1 = now;
     const t0 = Math.min(t1, first ?? t1 - Math.max(800, 60 * wordCount(text)));
