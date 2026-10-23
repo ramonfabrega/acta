@@ -9,7 +9,6 @@
   // The Worker serves the page too. Cloudflare Access guards the hostname;
   // the Worker verifies the Access JWT (CF_ACCESS_TEAM_DOMAIN / CF_ACCESS_AUD).
   "routes": [{ "pattern": "acta.ramonfabrega.com", "custom_domain": true }],
-  "assets": { "directory": "web/dist", "binding": "ASSETS" },
 
   // One Scribe per meeting: agent socket, utterances, paragraphs, the book.
   "durable_objects": {
@@ -27,9 +26,11 @@
   "vars": {
     // Non-secret identifiers. Secrets go through `wrangler secret put`:
     //   RTK_API_TOKEN   Cloudflare API token with Realtime admin scope
-    //   WEBHOOK_SECRET  RealtimeKit webhook signing secret
-    //   EVENTS_TOKEN    bearer for the per-meeting events socket the brain arms
+    //   ACTA_TOKEN      the one operator bearer: CLI, brain, events socket
+    // Webhooks need no secret: RealtimeKit signs them with a published RSA key.
     "RTK_APP_ID": "276bc18e-e03f-4d6e-909e-898691b379ef",
+    "CF_ACCOUNT_ID": "2deff21d2e459d1c5997c4fe57a208e2",
+    "PUBLIC_HOST": "acta.ramonfabrega.com",
     "CF_ACCESS_TEAM_DOMAIN": "",
     "CF_ACCESS_AUD": ""
   }
