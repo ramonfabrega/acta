@@ -62,14 +62,15 @@ cli.command("meetings", {
 });
 
 cli.command("tail", {
-  description: "Follow a meeting's events socket: one line per frame (hello, started, participant, paragraph, book, ended); exits 0 on `ended`. The brain's manual fallback when Monitor is unavailable.",
+  description: "Follow a meeting's events socket, the feed the brain's Monitor sees: hello, started, participant, agent, paragraphs (a digest, at most one a minute), book, ended; exits 0 on `ended`. The brain's manual fallback when Monitor is unavailable.",
   args: z.object({ id: z.string().describe("Meeting id (from `acta new`)") }),
   options: z.object({
-    frames: z.boolean().optional().describe("Yield each frame as its object instead of a readable line (`--format jsonl` for one JSON object per frame)"),
+    frames: z.boolean().optional().describe("Yield each frame as its object instead of readable lines (`--format jsonl` for one JSON object per frame)"),
+    each: z.boolean().optional().describe("One `paragraph` frame per paragraph as it closes, instead of the one-a-minute `paragraphs` digest (for watching live)"),
   }),
-  hint: "Frames are sparse (20-40 an hour). Reconnects with backoff after a drop; a late connect still receives `ended`.",
+  hint: "A digest is at most one frame a minute; `--each` is a line per paragraph as it closes (a few hundred an hour with three people). Reconnects with backoff after a drop; a late connect still receives `ended`.",
   async *run(c) {
-    const it = follow(c.args.id);
+    const it = follow(c.args.id, { each: c.options.each });
     for (;;) {
       const n = await it.next();
       if (n.done) return n.value.ok ? c.ok(undefined) : c.error({ code: "NO_SOCKET", message: n.value.reason, retryable: true });

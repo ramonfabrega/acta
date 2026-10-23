@@ -43,11 +43,18 @@ import {
   type Utterance,
   TrackDownloadUrlSchema,
 } from "./core/schemas.ts";
+import { stampPartial, t0For, type PartialStamp } from "./core/timing.ts";
 import { RTK_AGENT_WS_URL, addParticipant, getRecording, rtkConfig, startTrackRecording, stopRecording, RtkError } from "./rtk.ts";
 
 const PING_EVERY_MS = 20_000;
 const PING_TIMEOUT_MS = 10_000;
 const LEAVE_GRACE_MS = 20_000;
+/**
+ * Paragraphs go to the brain as one `paragraphs` digest per minute at most
+ * (docs/MEETING1.md, item 1: three people make about three hundred
+ * paragraphs an hour, and every frame is a notification).
+ */
+export const DIGEST_MS = 60_000;
 /** Nobody showed up: close the agent so it stops billing. A later join reopens. */
 const NO_SHOW_MS = 30 * 60_000;
 const RECORDING_RETRY_MS = 15_000;
@@ -105,7 +112,8 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
   private pingAwaitUntil: number | null = null;
   private pingDue: number | null = null;
   private requestSeq = 0;
-  private readonly firstPartial = new Map<string, number>();
+  /** Per peer: receipt of the first and latest partial of the utterance in flight (src/core/timing.ts). */
+  private readonly partials = new Map<string, PartialStamp>();
   private readonly peers = new Map<string, Peer>();
   private readonly earlyPresent = new Set<string>();
   private recordingInFlight = false;
@@ -144,6 +152,9 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS copies (
       key TEXT PRIMARY KEY, kind TEXT NOT NULL, url TEXT, status TEXT NOT NULL, size INTEGER, at INTEGER NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER, error TEXT)`);
+    // The meeting's own log: every `log()` line, written to R2 as log.jsonl so the
+    // record outlives Workers Logs' retention and travels with the meeting.
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS log (n INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, json TEXT NOT NULL)`);
   }
 
   private meta(key: string): string | null {
@@ -182,7 +193,29 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
   }
 
   private log(ev: string, fields: Record<string, unknown> = {}): void {
-    console.log(JSON.stringify({ at: new Date().toISOString(), meeting: this.meta("meetingId"), ev, ...fields }));
+    const now = Date.now();
+    const line = JSON.stringify({ at: new Date(now).toISOString(), meeting: this.meta("meetingId"), ev, ...fields });
+    console.log(line);
+    try {
+      this.sql.exec(`INSERT INTO log (at, json) VALUES (?, ?)`, now, line);
+    } catch {
+      // logging never throws; the console line is already out
+    }
+  }
+
+  /** `log.jsonl`: one line per `log()` call, in order. */
+  private logLines(): { lines: string; lastN: number } {
+    const rows = this.sql.exec(`SELECT n, json FROM log ORDER BY n`).toArray().map((r) => z.object({ n: z.number(), json: z.string() }).parse(r));
+    return { lines: rows.map((r) => r.json).join("\n") + (rows.length ? "\n" : ""), lastN: rows[rows.length - 1]?.n ?? 0 };
+  }
+
+  /** After the end, the copies keep logging: rewrite log.jsonl when new lines exist. */
+  private async flushLog(): Promise<void> {
+    if (this.state !== "ended") return;
+    const { lines, lastN } = this.logLines();
+    if (lastN <= (this.metaNum("logWrittenN") ?? 0)) return;
+    await this.putR2("log.jsonl", lines, "application/x-ndjson");
+    this.setMeta("logWrittenN", lastN);
   }
 
   // --- RPC ---------------------------------------------------------------------
@@ -413,12 +446,15 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
   override async fetch(req: Request): Promise<Response> {
     if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("expected websocket", { status: 426 });
     if (this.state === null) return new Response("no such meeting", { status: 404 });
-    const path = new URL(req.url).pathname;
+    const url = new URL(req.url);
+    const path = url.pathname;
     const tag = path.endsWith("/events") ? "events" : path.endsWith("/ws") ? "room" : null;
     if (!tag) return new Response("not found", { status: 404 });
+    // An events socket is either `digest` (the brain: one `paragraphs` frame per minute) or `each` (one `paragraph` frame per paragraph).
+    const each = tag === "events" && url.searchParams.get("each") === "1";
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
-    this.ctx.acceptWebSocket(server, [tag]);
+    this.ctx.acceptWebSocket(server, tag === "events" ? [tag, each ? "each" : "digest"] : [tag]);
     const headers = new Headers();
     const protos = (req.headers.get("Sec-WebSocket-Protocol") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     if (protos.includes("acta.v1")) headers.set("Sec-WebSocket-Protocol", "acta.v1");
@@ -430,13 +466,14 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
         title: this.meta("title") ?? "",
         since: this.metaNum("createdAt") ?? 0,
         state,
+        digest: each ? null : DIGEST_MS,
       });
       if (state === "ended") send(server, this.endedFrame());
     } else {
       send(server, { type: "book", ...this.readBook() });
       if (this.state === "ended") send(server, { type: "ended", at: this.metaNum("endedAt") ?? 0 });
     }
-    this.log("socket.open", { tag });
+    this.log("socket.open", { tag, cadence: tag === "events" ? (each ? "each" : "digest") : undefined });
     return new Response(null, { status: 101, webSocket: client, headers });
   }
 
@@ -453,8 +490,27 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     }
   }
 
+  /** Every events socket; paragraphs go through `emitParagraph` and `emitDigest` instead. */
   private emit(frame: EventFrame): void {
     for (const ws of this.ctx.getWebSockets("events")) send(ws, frame);
+  }
+
+  private emitAgent(event: "lost" | "connected" | "gap", detail: string): void {
+    this.emit({ type: "agent", event, at: Date.now(), detail });
+  }
+
+  /** The `paragraphs` digest: everything closed since the last one, to the `digest` sockets. */
+  private emitDigest(now: number): void {
+    this.setMeta("digestDue", null);
+    const from = this.metaNum("digestedN") ?? 0;
+    const rows = this.sql.exec(`SELECT n, json FROM paragraphs WHERE n > ? ORDER BY n`, from).toArray()
+      .map((r) => z.object({ n: z.number(), json: z.string() }).parse(r));
+    if (rows.length === 0) return;
+    const paragraphs = rows.map((r) => ParagraphSchema.parse(JSON.parse(r.json)));
+    this.setMeta("digestedN", rows[rows.length - 1]!.n);
+    const frame: EventFrame = { type: "paragraphs", paragraphs, at: now };
+    for (const ws of this.ctx.getWebSockets("digest")) send(ws, frame);
+    this.log("digest", { paragraphs: paragraphs.length, sockets: this.ctx.getWebSockets("digest").length });
   }
 
   private room(frame: RoomFrame): void {
@@ -499,7 +555,12 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
       });
       ws.addEventListener("error", () => this.log("agent.error", {}));
       this.request("connection.get");
-      this.log("agent.open", { resume: Boolean(resume && connId) });
+      const resumed = Boolean(resume && connId);
+      this.log("agent.open", { resume: resumed });
+      if (this.metaNum("agentLostAt") !== null) {
+        this.emitAgent("connected", resumed ? "agent socket back, resuming the connection" : "agent socket back on a fresh connection");
+        this.setMeta("agentLostAt", null);
+      }
     } catch (e) {
       this.log("agent.connect_failed", { error: String(e), resume });
       this.scheduleReconnect("backoff");
@@ -538,9 +599,15 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     this.agent = null;
     this.pingAwaitUntil = null;
     this.pingDue = null;
+    // Whatever was in flight is gone with the socket; a stale stamp must not reach the next final.
+    this.partials.clear();
     this.log("agent.close", { code, reason });
     const state = this.state;
     if (state === "ended" || state === "ending") return;
+    if (code !== 1000) {
+      this.setMeta("agentLostAt", Date.now());
+      this.emitAgent("lost", `agent socket closed ${code}${reason ? ` ${reason}` : ""}; finals until it is back may be missing`);
+    }
     if (code === 1000) {
       // session_ended: a new session needs a new connection; this meeting's session is over.
       this.setMeta("connectionId", null);
@@ -613,6 +680,7 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
         const prev = this.meta("sessionId");
         if (prev === s.id) {
           this.log("agent.gap", { sessionId: s.id }); // a resumed connection marks lost events this way
+          this.emitAgent("gap", "the resumed connection replayed session.started: events in the gap were lost");
           return;
         }
         this.setMeta("sessionId", s.id);
@@ -634,16 +702,9 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
       case "participant.join": {
         const p = m.data.participant;
         if (p.preset_name === AGENT_PRESET || p.custom_participant_id === AGENT_USER_ID) return;
-        const known = this.participant(p.peer_id);
-        const peer = this.upsertParticipant(p.peer_id, p.participant_id ?? p.peer_id, p.custom_participant_id, p.display_name, now);
+        this.upsertParticipant(p.peer_id, p.participant_id ?? p.peer_id, p.custom_participant_id, p.display_name, now);
         this.setMeta("leaveAt", null);
         if (this.earlyPresent.delete(p.peer_id)) this.markPresent(p.peer_id, now);
-        if (!known) {
-          this.emit({ type: "participant", event: "join", speaker: peer.speaker, userId: peer.userId, at: now });
-          this.log("participant.join", { peerId: p.peer_id, speaker: peer.speaker });
-        } else {
-          this.log("participant.rejoin", { peerId: p.peer_id }); // a failed first attempt, same peer
-        }
         void this.maybeStartRecording();
         await this.arm();
         return;
@@ -658,7 +719,7 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
           this.emit({ type: "participant", event: "leave", speaker: row.speaker, userId: row.user_id, at: now });
           this.log("participant.leave", { peerId: p.peer_id, speaker: row.speaker });
         }
-        this.firstPartial.delete(p.peer_id);
+        this.partials.delete(p.peer_id);
         const inRoom = CountRow.parse(this.sql.exec(`SELECT COUNT(*) AS n FROM participants WHERE left_at IS NULL`).one()).n;
         const everPresent = CountRow.parse(this.sql.exec(`SELECT COUNT(*) AS n FROM participants WHERE present_at IS NOT NULL`).one()).n;
         if (inRoom === 0 && everPresent > 0 && (this.state === "live" || this.state === "idle")) {
@@ -681,13 +742,13 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     const sp = d.speaker;
     const peer = this.peerFor(sp.peer_id, sp.participant_id, sp.custom_participant_id, sp.display_name, now);
     if (!d.is_final) {
-      if (!this.firstPartial.has(sp.peer_id)) this.firstPartial.set(sp.peer_id, now);
+      this.partials.set(sp.peer_id, stampPartial(this.partials.get(sp.peer_id), now));
       this.machine.partial(peer.userId, now);
       await this.arm();
       return;
     }
-    const first = this.firstPartial.get(sp.peer_id);
-    this.firstPartial.delete(sp.peer_id);
+    const stamp = this.partials.get(sp.peer_id);
+    this.partials.delete(sp.peer_id);
     const text = d.text.trim();
     // Never await before the insert: a second final would land first and
     // break the JSONL's t1 order (seen live 2026-10-23). The start call
@@ -697,7 +758,7 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
       void this.maybeStartRecording();
     }
     const t1 = now;
-    const t0 = Math.min(t1, first ?? t1 - Math.max(800, 60 * wordCount(text)));
+    const t0 = t0For(stamp, t1, wordCount(text));
     const seq = this.count("utterances");
     const u: StoredUtterance = {
       seq, t0, t1, speaker: peer.speaker, userId: peer.userId, peerId: sp.peer_id,
@@ -740,14 +801,27 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     return this.upsertParticipant(peerId, participantId ?? peerId, userId, name, now);
   }
 
-  /** Idempotent by peer_id. The speaker slug is fixed at first sight and unique per userId. */
+  /**
+   * Idempotent by peer_id. The speaker slug is fixed at first sight and unique
+   * per userId. A `join` frame goes out when the peer is new or comes back
+   * after a real leave; a second join of a peer still in the room (the failed
+   * first attempt from the spike) is silent. A transcript can register a peer
+   * before its join frame arrives, so the frame is emitted here, once, for
+   * both paths (docs/MEETING1.md, item 3).
+   */
   private upsertParticipant(peerId: string, participantId: string, customId: string | null, name: string | null, now: number): Peer {
     const userId = customId || participantId || peerId;
     const row = this.participant(peerId);
     if (row) {
-      this.sql.exec(`UPDATE participants SET left_at = NULL WHERE peer_id = ?`, peerId);
       const p = { userId: row.user_id, speaker: row.speaker };
       this.peers.set(peerId, p);
+      if (row.left_at === null) {
+        this.log("participant.rejoin", { peerId });
+      } else {
+        this.sql.exec(`UPDATE participants SET left_at = NULL WHERE peer_id = ?`, peerId);
+        this.emit({ type: "participant", event: "join", speaker: p.speaker, userId: p.userId, at: now });
+        this.log("participant.join", { peerId, speaker: p.speaker, returned: true });
+      }
       return p;
     }
     const same = this.sql.exec(`SELECT speaker FROM participants WHERE user_id = ? LIMIT 1`, userId).toArray()[0];
@@ -764,6 +838,8 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     );
     const p = { userId, speaker };
     this.peers.set(peerId, p);
+    this.emit({ type: "participant", event: "join", speaker, userId, at: now });
+    this.log("participant.join", { peerId, speaker });
     return p;
   }
 
@@ -816,8 +892,10 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     this.sql.exec(`INSERT OR IGNORE INTO paragraphs (id, t0, json) VALUES (?, ?, ?)`, p.id, p.t0, JSON.stringify(p));
     const start = this.metaNum("startedAt") ?? this.metaNum("createdAt") ?? p.t0;
     const current = this.readBook().sections.transcript ?? "";
-    this.writeSection("transcript", appendParagraphToTranscript(current, p, start), Date.now());
-    this.emit({ type: "paragraph", paragraph: p });
+    const now = Date.now();
+    this.writeSection("transcript", appendParagraphToTranscript(current, p, start), now);
+    for (const ws of this.ctx.getWebSockets("each")) send(ws, { type: "paragraph", paragraph: p });
+    if (this.metaNum("digestDue") === null) this.setMeta("digestDue", now + DIGEST_MS);
     this.room({ type: "paragraph", paragraph: p });
     this.room({ type: "book", ...this.readBook() });
     this.log("paragraph", { id: p.id, speaker: p.speaker, words: wordCount(p.text), asides: p.asides.length });
@@ -882,9 +960,11 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     }
     for (const p of this.machine.flush(Number.MAX_SAFE_INTEGER)) this.storeParagraph(p);
     this.saveParagraphState();
-    this.firstPartial.clear();
+    this.partials.clear();
     this.setMeta("endedAt", now);
     this.setMeta("endReason", reason);
+    this.setMeta("agentLostAt", null);
+    this.emitDigest(now); // the last paragraphs reach the brain before `ended`
     try {
       await this.writeMeetingToR2();
     } catch (e) {
@@ -935,13 +1015,16 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
       counts: { utterances: this.count("utterances"), paragraphs: paragraphs.length },
       engine: ENGINE,
     };
+    const log = this.logLines();
     await Promise.all([
       this.putR2("utterances.jsonl", utterances, "application/x-ndjson"),
       this.putR2("paragraphs.json", JSON.stringify(paragraphs, null, 2), "application/json"),
       this.putR2("book.md", renderBook(this.readBook()), "text/markdown; charset=utf-8"),
       this.putR2("meta.json", JSON.stringify(meta, null, 2), "application/json"),
+      this.putR2("log.jsonl", log.lines, "application/x-ndjson"),
     ]);
-    this.log("r2.written", { utterances: meta.counts.utterances, paragraphs: paragraphs.length });
+    this.setMeta("logWrittenN", log.lastN);
+    this.log("r2.written", { utterances: meta.counts.utterances, paragraphs: paragraphs.length, log: log.lastN });
   }
 
   // --- R2 copies of vendor files ------------------------------------------------------------
@@ -1021,6 +1104,8 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     }
     const pd = this.machine.nextDeadline();
     if (pd !== null) candidates.push(pd);
+    const digest = this.metaNum("digestDue");
+    if (digest !== null) candidates.push(digest);
     const copy = this.sql.exec(`SELECT MIN(next_at) AS next_at FROM copies WHERE status = 'pending'`).toArray()[0];
     const nextCopy = copy ? NextAtRow.parse(copy).next_at : null;
     if (nextCopy !== null) candidates.push(nextCopy);
@@ -1069,8 +1154,15 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
       this.saveParagraphState();
       for (const p of closed) this.storeParagraph(p);
     }
+    const digestDue = this.metaNum("digestDue");
+    if (digestDue !== null && now >= digestDue) this.emitDigest(now);
     await this.arm();
     await this.runCopies(now);
+    try {
+      await this.flushLog();
+    } catch (e) {
+      this.log("r2.log_failed", { error: String(e) });
+    }
     await this.arm();
   }
 }

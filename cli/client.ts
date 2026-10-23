@@ -237,9 +237,14 @@ export function eventsUrl(id: string): string {
   return `${baseUrl().replace(/^http/, "ws")}/m/${enc(id)}/events`;
 }
 
+export type EventsOptions = {
+  /** One `paragraph` frame per paragraph instead of the one-a-minute `paragraphs` digest the brain gets. */
+  each?: boolean | undefined;
+};
+
 /** Open `/m/:id/events` with the bearer in the Authorization header (Bun only). */
-export function events(id: string, h: EventsHandlers): EventsSocket {
-  const ws = new BunWebSocket(eventsUrl(id), { headers: { authorization: `Bearer ${token()}` } });
+export function events(id: string, h: EventsHandlers, opts: EventsOptions = {}): EventsSocket {
+  const ws = new BunWebSocket(`${eventsUrl(id)}${opts.each ? "?each=1" : ""}`, { headers: { authorization: `Bearer ${token()}` } });
   let resolveClosed: (v: { code: number; reason: string }) => void = () => {};
   const closed = new Promise<{ code: number; reason: string }>((r) => { resolveClosed = r; });
   ws.addEventListener("open", () => h.open?.());

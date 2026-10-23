@@ -40,7 +40,8 @@ Monitor({ ws: { url: "wss://acta.ramonfabrega.com/m/<id>/events?token=<ACTA_TOKE
 \`\`\`
 
 Arm it before anyone joins. Each frame is one notification (hello, started,
-participant, paragraph, book, ended), twenty to forty an hour. Re-arm on
+participant, paragraphs, agent, book, ended); paragraphs come as a digest,
+at most one frame a minute, so expect up to sixty frames an hour. Re-arm on
 every expiry notice (every 30 minutes) until the \`ended\` frame; \`acta tail
 <id>\` under /loop is the fallback when Monitor is unavailable. Read the book
 before writing it (\`acta book show\`), write sections with \`acta book put\`,

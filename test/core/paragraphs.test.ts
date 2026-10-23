@@ -46,7 +46,7 @@ describe("paragraphs", () => {
     seq = 0;
     const m = createParagraphs();
     m.push(u("ana", "we should ship on friday", 0, 3000));
-    const closed = m.push(u("ben", "I disagree with that completely", 3500, 6000));
+    const closed = m.push(u("ben", "I disagree with that completely, it is too soon", 3500, 6000));
     expect(closed.map((p) => p.speaker)).toEqual(["ana"]);
     expect(m.state().open?.speaker).toBe("ben");
   });
@@ -84,23 +84,57 @@ describe("paragraphs", () => {
     const m = createParagraphs();
     m.push(u("ana", "that is all from me", 0, 5000));
     m.push(u("ben", "mhm", 5200, 5800));
-    expect(m.nextDeadline()).toBe(7300);
-    expect(m.flush(7299)).toEqual([]);
-    const closed = m.flush(7300);
-    expect(closed.map((p) => p.text)).toEqual(["that is all from me"]);
-    expect(m.state().open).toMatchObject({ speaker: "ben", pieces: ["mhm"], utterances: [1] });
-    expect(m.nextDeadline()).toBe(9800);
-    expect(m.flush(9800)).toMatchObject([{ speaker: "ben", text: "mhm", asides: [] }]);
+    expect(m.nextDeadline()).toBe(9800); // the candidate has the whole gap
+    expect(m.flush(9799)).toEqual([]);
+    // Rejected at the gap: ana's paragraph closes and the "mhm" replays as speech whose own gap has expired too.
+    expect(m.flush(9800)).toMatchObject([{ speaker: "ana", text: "that is all from me" }, { speaker: "ben", text: "mhm", asides: [] }]);
+    expect(m.state()).toMatchObject({ open: null, candidates: [] });
+    expect(m.nextDeadline()).toBeNull();
   });
 
-  test("the floor-holder resuming too late does not take the aside", () => {
+  test("the floor-holder resuming after the gap does not take the aside", () => {
     seq = 0;
     const m = createParagraphs();
     m.push(u("ana", "that is all from me", 0, 5000));
     m.push(u("ben", "mhm", 5200, 5800));
-    const closed = m.push(u("ana", "oh and one more thing", 7400, 9000));
+    const closed = m.push(u("ana", "oh and one more thing", 10_500, 12_000));
     expect(closed.map((p) => [p.speaker, p.text])).toEqual([["ana", "that is all from me"], ["ben", "mhm"]]);
     expect(m.state().open?.speaker).toBe("ana");
+  });
+
+  test("a sandwiched interjection folds when the floor-holder's next final lands within the gap (live meeting 1)", () => {
+    // Finals arrive a second or two after speech: a 1.5 s bound was never met, and 34 of these closed as paragraphs.
+    seq = 0;
+    const m = createParagraphs();
+    m.push(u("ana", "so what we saw in the pilot was", 0, 5000));
+    m.push(u("ben", "right, yes", 5300, 6100));
+    const closed = m.push(u("ana", "that nobody used the export", 7900, 9000)); // 2.6 s after the interjection
+    expect(closed).toEqual([]);
+    expect(m.flush(14_000)[0]).toMatchObject({
+      speaker: "ana",
+      text: "so what we saw in the pilot was [ben: right, yes] that nobody used the export",
+      utterances: [0, 2],
+      asides: [{ speaker: "ben" }],
+    });
+  });
+
+  test("a short real turn still closes the paragraph when nobody continues", () => {
+    seq = 0;
+    const m = createParagraphs();
+    m.push(u("ana", "any questions", 0, 2000));
+    m.push(u("ben", "no, all clear", 2300, 3200));
+    expect(m.flush(7199)).toEqual([]);
+    expect(m.flush(7200).map((p) => [p.speaker, p.text])).toEqual([["ana", "any questions"], ["ben", "no, all clear"]]);
+  });
+
+  test("the backchannel bound is five words under three seconds", () => {
+    seq = 0;
+    const m = createParagraphs();
+    m.push(u("ana", "so the plan is", 0, 5000));
+    expect(m.push(u("ben", "sí claro me parece bien", 5200, 7000))).toEqual([]);
+    expect(m.state().candidates).toHaveLength(1);
+    const closed = m.push(u("cara", "I have one question about it", 7200, 8000));
+    expect(closed.map((p) => p.speaker)).toEqual(["ana", "ben"]);
   });
 
   test("two consecutive candidates both become asides", () => {
@@ -109,7 +143,7 @@ describe("paragraphs", () => {
     m.push(u("ana", "so the plan is", 0, 5000));
     m.push(u("ben", "mhm", 5200, 5800));
     m.push(u("cara", "yeah", 6000, 6400));
-    expect(m.nextDeadline()).toBe(7900);
+    expect(m.nextDeadline()).toBe(10_400);
     expect(m.push(u("ana", "we ship friday", 7800, 9000))).toEqual([]);
     expect(m.flush(13_000)[0]).toMatchObject({
       text: "so the plan is [ben: mhm] [cara: yeah] we ship friday",
@@ -124,8 +158,8 @@ describe("paragraphs", () => {
     m.push(u("ana", "anything else", 0, 5000));
     m.push(u("ben", "mhm", 5200, 5800));
     m.push(u("cara", "yeah", 6000, 6400));
-    expect(m.flush(7900).map((p) => p.speaker)).toEqual(["ana", "ben"]);
-    expect(m.flush(10_400).map((p) => [p.speaker, p.text])).toEqual([["cara", "yeah"]]);
+    expect(m.flush(10_399)).toEqual([]);
+    expect(m.flush(10_400).map((p) => [p.speaker, p.text])).toEqual([["ana", "anything else"], ["ben", "mhm"], ["cara", "yeah"]]);
   });
 
   test("a long final from a third speaker closes the floor and the candidate", () => {

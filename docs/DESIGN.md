@@ -80,7 +80,11 @@ sparse event and the session armed the harness Monitor on it; about 30
 events for a draft, no polling, no missed trigger on record. Monitor has a
 native `ws:` source; each frame is a notification; 30-minute arms,
 re-armed. A loop is a timer that wakes whether or not anything happened.
-The design cost is that the feed must be sparse, hence the paragraph rule.
+The design cost is that the feed must be sparse. The paragraph rule alone
+does not make it so: the first live meeting (10-23) closed about three
+hundred paragraphs an hour with three people, and no backchannel bound
+gets a real conversation under a hundred. Sparseness comes from the
+transport: Scribe sends paragraphs as a digest, at most one frame a minute.
 *Rejected:* `/loop` as primary (kept as fallback); SSE polling; routing
 events through a chat tool and back.
 

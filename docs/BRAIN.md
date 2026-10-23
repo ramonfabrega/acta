@@ -75,22 +75,26 @@ its output on each tick. It reconnects with backoff after a drop.
 
 ### The frames
 
-Scribe emits twenty to forty frames an hour, and each one is a
-notification:
+Every frame is a notification. Paragraphs come as a digest, at most one
+frame a minute (three people close a few hundred paragraphs an hour; the
+first live meeting measured it), so expect up to sixty frames an hour while
+people talk and silence between:
 
 | frame | when | what to do |
 | --- | --- | --- |
-| `hello` | on connect | confirm the id and title; state is `live` from the mint |
+| `hello` | on connect | confirm the id and title; state is `live` from the mint; `digest` is the cadence in ms |
 | `started` | the room session began (the agent's join, at mint; before you connect, usually) | nothing |
-| `participant` | a join or a leave | note who is in the room; the first human join starts the recording |
-| `paragraph` | a turn closed (speaker change, ~4 s gap, ~120 s cap) | read it; write when it changes the book |
+| `participant` | a join, a leave, or a return after a real leave | note who is in the room; the first human join starts the recording |
+| `paragraphs` | every paragraph closed since the last digest, in order | read them; write when they change the book |
+| `agent` | Scribe's socket to RealtimeKit was `lost`, came back (`connected`), or resumed past a `gap` | note the time in `notes`: finals in between may be missing |
 | `book` | a section was written | nothing (it is your own write echoed) |
-| `ended` | the last human left | the final pass, below |
+| `ended` | the last human left (the last digest comes just before it) | the final pass, below |
 
 A paragraph is `{speaker, t0, t1, text, asides}`. A backchannel ("mhm",
-"sí") appears inline in the floor-holder's text as `[ben: mhm]`; it is not a
-turn. Speakers are fields, never a guess: use the `speaker` names as they
-are.
+"sí, claro") appears inline in the floor-holder's text as `[ben: mhm]`; it is
+not a turn. Speakers are fields, never a guess: use the `speaker` names as
+they are. `acta tail <id> --each` shows one line per paragraph as it
+closes, for a human watching; the brain reads digests.
 
 ### Writing the book
 
@@ -142,7 +146,7 @@ The `ended` frame carries the reason and the counts. Then, in order:
 
    ```sh
    acta export <id> --out ~/.acta/exports/<id>.md
-   acta sync <id>        # recordings, utterances.jsonl, book, paragraphs → ~/.acta/meetings/<id>/
+   acta sync <id>        # recordings, utterances.jsonl, book, paragraphs, log.jsonl → ~/.acta/meetings/<id>/
    acta doctor           # exit 1 lists what has not landed
    ```
 
@@ -167,5 +171,9 @@ The `ended` frame carries the reason and the counts. Then, in order:
   needs the plugin enabled (`enabledPlugins` in settings.json, `/reload-plugins`
   after an edit). Build the Monitor call by hand from step 2.
 - **Firehose suppression**: the harness suppresses a monitor that emits too
-  many events. Scribe's feed is sparse by design; if it ever trips, the
-  bug is in Scribe's paragraph rule, not in the monitor.
+  many events. Scribe's feed is at most about one frame a minute by
+  design (the digest); if it ever trips, the bug is in Scribe, not in the
+  monitor.
+- **What happened at hh:mm?** `log.jsonl` in `~/.acta/meetings/<id>/`
+  after `acta sync` is Scribe's own log of the meeting: agent socket
+  closes and reconnects, joins and leaves, every paragraph, the copies.

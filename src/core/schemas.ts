@@ -80,11 +80,22 @@ export type MeetingState = z.infer<typeof MeetingStateSchema>;
 
 // --- events socket frames (sparse by design) -----------------------------
 
+/**
+ * Paragraphs reach the events socket as a `paragraphs` digest: every
+ * paragraph closed since the last digest, at most one frame per `DIGEST_MS`
+ * (`digest` in `hello`). `?each=1` on the socket URL asks for one
+ * `paragraph` frame per paragraph instead (`acta tail --each`, humans).
+ * `agent` frames tell the brain when the agent socket to RealtimeKit was
+ * lost, came back, or resumed after a gap in which finals may be missing.
+ */
 export const EventFrameSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("hello"), meetingId: z.string(), title: z.string(), since: z.number().int(), state: MeetingStateSchema }),
+  z.object({ type: z.literal("hello"), meetingId: z.string(), title: z.string(), since: z.number().int(), state: MeetingStateSchema,
+    digest: z.number().int().nullable().default(null) }),
   z.object({ type: z.literal("started"), sessionId: z.string(), at: z.number().int() }),
   z.object({ type: z.literal("participant"), event: z.enum(["join", "leave"]), speaker: z.string(), userId: z.string(), at: z.number().int() }),
   z.object({ type: z.literal("paragraph"), paragraph: ParagraphSchema }),
+  z.object({ type: z.literal("paragraphs"), paragraphs: z.array(ParagraphSchema).min(1), at: z.number().int() }),
+  z.object({ type: z.literal("agent"), event: z.enum(["lost", "connected", "gap"]), at: z.number().int(), detail: z.string() }),
   z.object({ type: z.literal("book"), section: BookSectionSchema, updatedAt: z.number().int() }),
   z.object({ type: z.literal("ended"), at: z.number().int(), reason: z.string(), utterances: z.number().int(), paragraphs: z.number().int() }),
 ]);

@@ -116,9 +116,14 @@ describe("helpers", () => {
     expect(renderBook(book, "notes")).toBe("");
   });
 
-  test("frameLine is one line per frame", () => {
+  test("frameLine is one line per frame, one per paragraph for a digest", () => {
     const p: Paragraph = { id: "p1", t0: 7000, t1: 12000, speaker: "ana", userId: "u", text: "hola [ben: mhm] mundo", utterances: [0, 1], asides: [{ speaker: "ben", text: "mhm", t0: 8000 }] };
     expect(frameLine({ type: "paragraph", paragraph: p })).toBe("00:00:07-00:00:12 ana: hola [ben: mhm] mundo");
+    const q: Paragraph = { ...p, id: "p2", t0: 13_000, t1: 15_000, speaker: "ben", text: "claro", utterances: [2], asides: [] };
+    expect(frameLine({ type: "paragraphs", paragraphs: [p, q], at: 60_000 })).toBe("00:00:07-00:00:12 ana: hola [ben: mhm] mundo\n00:00:13-00:00:15 ben: claro");
+    expect(frameLine({ type: "hello", meetingId: "m", title: "T", since: 0, state: "live", digest: 60_000 })).toBe('hello m "T" state=live since=00:00:00 digest=60s');
+    expect(frameLine({ type: "hello", meetingId: "m", title: "T", since: 0, state: "live", digest: null })).toBe('hello m "T" state=live since=00:00:00');
+    expect(frameLine({ type: "agent", event: "lost", at: 5000, detail: "agent socket closed 1006" })).toBe("00:00:05 agent lost: agent socket closed 1006");
     expect(frameLine({ type: "ended", at: 60_000, reason: "last_leave", utterances: 3, paragraphs: 1 })).toBe("00:01:00 ended reason=last_leave utterances=3 paragraphs=1");
   });
 });
@@ -192,8 +197,9 @@ describe("acta test assertions", () => {
 
   test("a clean run passes every required check", () => {
     const files = [{ key: "meetings/m/utterances.jsonl", size: 10, uploaded: null }];
-    const checks = assess(fixture, { utterances, paragraphs, files, jsonlLines: 3, ended, forcedEnd: false, meetingId: "m" });
+    const checks = assess(fixture, { utterances, paragraphs, files, jsonlLines: 3, ended, forcedEnd: false, meetingId: "m", digested: paragraphs.map((p) => p.id) });
     expect(checks.filter((c) => c.level === "required").every((c) => c.ok)).toBe(true);
+    expect(checks.find((c) => c.name === "paragraphs digested")?.detail).toBe("2 paragraphs over the digests");
     const r = report("m", checks, paragraphs, [{ tag: "ana", ev: "joined", at: 0, ms: 0, data: null }], ["ana", "ben"]);
     expect(r.result).toBe("PASS");
     expect(r.paragraphs[0]).toEqual({ at: "00:00:01", speaker: "ana", text: "gracias por venir hoy [ben: mhm] revisamos el plan", asides: 1 });
@@ -203,9 +209,10 @@ describe("acta test assertions", () => {
   test("misattribution, a backchannel paragraph and a forced end fail", () => {
     const swapped = utterances.map((x) => (x.seq === 2 ? { ...x, speaker: "ana" } : x));
     const ownParagraph: Paragraph[] = [...paragraphs, { id: "p3", t0: 3000, t1: 3300, speaker: "ben", userId: "u_ben", text: "mhm", utterances: [0], asides: [] }];
-    const checks = assess(fixture, { utterances: swapped, paragraphs: ownParagraph, files: [], jsonlLines: null, ended, forcedEnd: true, meetingId: "m" });
+    const checks = assess(fixture, { utterances: swapped, paragraphs: ownParagraph, files: [], jsonlLines: null, ended, forcedEnd: true, meetingId: "m", digested: ["p1"] });
+    expect(checks.find((c) => c.name === "paragraphs digested")?.ok).toBe(false);
     const failed = checks.filter((c) => c.level === "required" && !c.ok).map((c) => c.name);
-    expect(failed).toEqual(["attribution", "backchannel @3s is an aside", "utterances.jsonl in R2", "ended"]);
+    expect(failed).toEqual(["attribution", "backchannel @3s is an aside", "paragraphs digested", "utterances.jsonl in R2", "ended"]);
     expect(report("m", checks, [], [], ["ana", "ben"]).result).toBe("FAIL");
   });
 });

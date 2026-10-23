@@ -8,6 +8,12 @@
 // partials (a provisional floor: the opening sentence's final arrives long
 // after a listener's "yes"). `partial()` is how Scribe reports partials, so
 // neither the gap nor a candidate resolves early under a long utterance.
+//
+// A candidate is decided by what follows it, not by a short wall-clock bound:
+// the floor-holder has the whole gap to go on (`continueWithinMs` equals
+// `gapMs`). The first live meeting (docs/MEETING1.md) closed 34 one-to-three
+// word interjections as paragraphs of their own because finals arrive a
+// second or two after speech and a 1.5 s bound was never met.
 import { z } from "zod";
 import { paragraphId } from "./ids.ts";
 import { AsideSchema, StoredUtteranceSchema, type Paragraph, type StoredUtterance } from "./schemas.ts";
@@ -23,9 +29,9 @@ export interface ParagraphOptions {
 export const DEFAULT_PARAGRAPH_OPTIONS: ParagraphOptions = {
   gapMs: 4000,
   capMs: 120_000,
-  backchannelMaxWords: 3,
-  backchannelMaxMs: 2000,
-  continueWithinMs: 1500,
+  backchannelMaxWords: 5,
+  backchannelMaxMs: 3000,
+  continueWithinMs: 4000,
 };
 
 const OpenSchema = z.object({

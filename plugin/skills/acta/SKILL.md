@@ -29,7 +29,8 @@ Monitor({ ws: { url: "wss://acta.ramonfabrega.com/m/<id>/events?token=<ACTA_TOKE
 ```
 
 Arm it before anyone joins. Each frame is one notification (hello, started,
-participant, paragraph, book, ended), twenty to forty an hour. Re-arm on
+participant, paragraphs, agent, book, ended); paragraphs come as a digest,
+at most one frame a minute, so expect up to sixty frames an hour. Re-arm on
 every expiry notice (every 30 minutes) until the `ended` frame; `acta tail
 <id>` under /loop is the fallback when Monitor is unavailable. Read the book
 before writing it (`acta book show`), write sections with `acta book put`,
@@ -181,7 +182,7 @@ Copy a meeting's R2 files (or every meeting's) to ~/.acta/meetings/<id>/, skippi
 
 ### acta tail
 
-Follow a meeting's events socket: one line per frame (hello, started, participant, paragraph, book, ended); exits 0 on `ended`. The brain's manual fallback when Monitor is unavailable.
+Follow a meeting's events socket, the feed the brain's Monitor sees: hello, started, participant, agent, paragraphs (a digest, at most one a minute), book, ended; exits 0 on `ended`. The brain's manual fallback when Monitor is unavailable.
 
 #### Arguments
 
@@ -193,9 +194,10 @@ Follow a meeting's events socket: one line per frame (hello, started, participan
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--frames` | `boolean` |  | Yield each frame as its object instead of a readable line (`--format jsonl` for one JSON object per frame) |
+| `--frames` | `boolean` |  | Yield each frame as its object instead of readable lines (`--format jsonl` for one JSON object per frame) |
+| `--each` | `boolean` |  | One `paragraph` frame per paragraph as it closes, instead of the one-a-minute `paragraphs` digest (for watching live) |
 
-> Frames are sparse (20-40 an hour). Reconnects with backoff after a drop; a late connect still receives `ended`.
+> A digest is at most one frame a minute; `--each` is a line per paragraph as it closes (a few hundred an hour with three people). Reconnects with backoff after a drop; a late connect still receives `ended`.
 
 ## acta test
 
