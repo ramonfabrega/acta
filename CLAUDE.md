@@ -10,7 +10,8 @@ First-evening checklist: `docs/SPIKE.md`.
 Start a session with `bun cli/acta.ts --llms` (`acta --llms` after
 `bun link`). This file is the map; `docs/V0.md` is the contract everything
 is built to (routes, shapes, the paragraph machine, vendor facts measured
-live); `docs/SPIKE.md` is the log of the first evening; `docs/DESIGN.md` the
+live); `docs/SPIKE.md` is the log of the first evening; `docs/MEETING1.md`
+the log of the first live meeting (what broke, with mechanisms); `docs/DESIGN.md` the
 decisions and what they beat; `docs/BRAIN.md` the runbook for the session
 that runs a meeting. v0 is deployed; see README for the loop.
 
