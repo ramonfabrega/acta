@@ -29,7 +29,7 @@
     //   RTK_API_TOKEN   Cloudflare API token with Realtime admin scope
     //   WEBHOOK_SECRET  RealtimeKit webhook signing secret
     //   EVENTS_TOKEN    bearer for the per-meeting events socket the brain arms
-    "RTK_APP_ID": "",
+    "RTK_APP_ID": "276bc18e-e03f-4d6e-909e-898691b379ef",
     "CF_ACCESS_TEAM_DOMAIN": "",
     "CF_ACCESS_AUD": ""
   }

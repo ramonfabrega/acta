@@ -4,25 +4,35 @@ Goal: three participants in the room with screen share for an hour, a book
 that filled in while they talked, and a folder in the R2 bucket with three
 audio tracks and the utterance JSONL. About $2.
 
-## Settle these in the first ten minutes
+## Settled in the first ten minutes (2026-10-23)
 
-1. Create a meeting with `ai_config.transcription.language: "multi"`. If the
-   API rejects it, try a single language code. Mixed-language live
-   transcription depends on this; the post-meeting Whisper pass auto-detects
-   either way.
-2. Open the prebuilt `RtkMeeting` in Chrome and share a screen. Only iOS is
-   documented as needing setup.
-3. Connect the agent socket and read one `transcript.received`: does it
-   carry a timestamp? The client payload does (epoch ms).
+1. `language: "multi"` → **400 "Invalid language 'multi' for post-meeting
+   transcription"** when `transcribe_on_end: true`; **201** with it false.
+   Live nova-3 then transcribed Spanish and English in one breath
+   ("Hola, hola, hola, prueba." … "lore, attrition, rise of nations.") with
+   the keyword `lore` landing. Meetings are created without post-meeting
+   Whisper; our batch pass over the tracks replaces it.
+2. Prebuilt `<rtk-meeting>` from the CDN, no bundler: screen share worked
+   first click (Chrome picker, nothing to configure). Served over Tailscale
+   Serve HTTPS because `getUserMedia` needs a secure context.
+3. Agent feed `transcript.received`: `started_at`/`ended_at` ISO to the
+   second, `started_at` = server receipt (it advances with every partial),
+   `ended_at` frequently later than wall-clock receipt. Not speech timing, no
+   segment id; the client payload's `date` is also second-granular. Scribe
+   keeps its own millisecond receipt clock for `t0`/`t1`.
+
+Spike meeting: app `acta` (`276bc18e-…`), presets `human` and `agent`
+created by API; 26 agent frames for 5 finals in 18 s of speech.
 
 ## Setup, in order
 
-- [ ] `bunx wrangler whoami` shows the right account, and the zone for the
-      hostname in `wrangler.jsonc` lives there.
-- [ ] RealtimeKit app on that account. Keep `RTK_APP_ID` in vars; the
-      Realtime-admin API token as the `RTK_API_TOKEN` secret.
-- [ ] Presets: `human` with `permissions.transcription_enabled: true`;
-      `agent` with `permissions.hidden_participant: true`.
+- [x] `bunx wrangler whoami` shows the right account (`2deff…08e2`).
+- [x] RealtimeKit app `acta` on that account, `RTK_APP_ID` in vars. The
+      Realtime-admin token lives in passage at
+      `tokens/cloudflare/personal/acta/rtk-admin`; `wrangler secret put
+      RTK_API_TOKEN` from there.
+- [x] Presets: `human` with `permissions.transcription_enabled: true`;
+      `agent` with `permissions.hidden_participant: true` and no media.
 - [ ] Webhook pointing at `https://<hostname>/hooks/rtk`, secret as
       `WEBHOOK_SECRET`. Subscribe to meeting, participant, recording and
       transcript events.
@@ -38,10 +48,10 @@ audio tracks and the utterance JSONL. About $2.
 
 1. `acta new "dev sync"`, run by the Claude Code session that will be the
    brain, which then shares nothing but a URL. The Worker creates the
-   meeting (`record_on_start`, `transcribe_on_end`, `summarize_on_end`,
-   `summary_type: team_meeting`, low `session_keep_alive_time_in_secs`,
-   `ai_config.transcription` with `multi` and the keywords), adds the agent
-   participant, stores its token in Scribe, and answers with the room link.
+   meeting (`ai_config.transcription` with `multi` and the keywords,
+   `transcribe_on_end: false`, no `record_on_start`,
+   `session_keep_alive_time_in_secs: 60`), adds the agent participant,
+   stores its token in Scribe, and answers with the room link.
 2. Scribe opens the agent socket at once, `subscriptions=transcript,participant`.
 3. A human opens the link, passes Access, the Worker mints a `human` token
    for that email and renders the room with the book pane beside it. On the
@@ -68,8 +78,18 @@ audio tracks and the utterance JSONL. About $2.
   human.
 - A redeploy mid-meeting drops words (5 s resume grace). Deploy between
   meetings.
-- `record_on_start` is the composite recording. Per-track is the explicit
-  Start-track-recording call on the first join.
+- `record_on_start` is the composite recording, and it starts on the
+  **agent's** join: the spike's first meeting uploaded a recording of one
+  hidden participant and silence. Per-track is the explicit
+  Start-track-recording call on the first human join.
+- `participant.join` can arrive twice for one `peer_id` (seen live, 107 s
+  apart, no leave between). Key everything on `peer_id`, idempotently.
+- The agent feed's timestamps are second-granular server clocks. The
+  paragraph rule's 1.5 s and 2 s thresholds run on Scribe's own receipt
+  clock; precise timing comes from the batch pass over stored tracks.
+- Browsers: first join in Firefox hung on "joining" (error 0014) until mic
+  and camera permissions were granted; the kit's right sidebar (participants,
+  chat, transcript) did not open there. Chrome is the tested path.
 - A hidden agent still bills and keeps the session alive. Close it on the
   last leave or the meeting never ends.
 - Recordings cannot be delivered to R2 directly. The webhook copy is the

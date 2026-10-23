@@ -25,8 +25,11 @@ reads text, never audio, and runs where the operator's subscription runs.
 - **Room**: Cloudflare RealtimeKit. Prebuilt `RtkMeeting` (screen share,
   mute, chat), one `human` preset with `transcription_enabled`, one `agent`
   preset with `hidden_participant`. Meetings are created with
-  `record_on_start`, `transcribe_on_end`, `summarize_on_end`,
-  `ai_config.transcription = { language: "multi", keywords }`. The page is
+  `ai_config.transcription = { language: "multi", keywords }` and
+  `transcribe_on_end: false` (the API rejects `multi` whenever post-meeting
+  Whisper is on; our own batch pass is the post-meeting transcript). No
+  `record_on_start`: it fires on the agent's lone join and records silence;
+  Scribe starts per-track recording on the first human join. The page is
   served by the Worker on the hostname in `wrangler.jsonc`, behind
   Cloudflare Access.
 - **Scribe**: one Durable Object per meeting (SQLite). Holds the agent
@@ -110,14 +113,24 @@ a real meeting.
 - Every push to `main` deploys (Workers Builds). Live-test with
   `bun run tail` open and a second browser or phone in the room.
 
-## Open until the spike settles them
+## Settled by the spike (2026-10-23, live against the API)
 
-1. Whether the Create-meeting API accepts `language: "multi"` (the API
-   reference lists ten codes without `es` or `multi`; the transcription docs
-   say both work). Bilingual live transcription depends on it; post-meeting
-   Whisper auto-detects regardless.
-2. Whether the agent feed's `transcript.received` carries a timestamp (the
-   client SDK payload does, in epoch ms).
-3. Whether the web `RtkMeeting` needs any setup for screen share (only iOS
-   is documented as special).
-4. The cap on `keywords`.
+1. `language: "multi"` is accepted and transcribes code-switched speech live,
+   **only when `transcribe_on_end` is false**: the one `language` field is
+   validated against Whisper's list when post-meeting transcription is on
+   (`multi` and `es-419` rejected, `es` accepted, omitted accepted). The API
+   reference enum is stale. We take `multi` and drop the vendor's Whisper and
+   `summarize_on_end`; the brain writes the summary.
+2. The agent feed's `transcript.received` has `started_at`/`ended_at` as ISO
+   strings **to the second**; `started_at` is server receipt and `ended_at`
+   is often in the future, so neither is speech timing, and there is no
+   segment id. The client SDK payload has a stable per-utterance `id` and a
+   `date` (ISO, second), not epoch ms. Scribe stamps `t0`/`t1` from its own
+   clock: first partial and final per speaker, milliseconds.
+3. Screen share in the web `RtkMeeting` needs no setup.
+4. No documented or observed cap on `keywords` (four tested).
+
+Also observed: `participant.join` redelivered once with the same `peer_id`
+(at-least-once is real; handlers key on `peer_id`); partials arrive two to
+four times a second per speaker and must never leave Scribe; the agent feed
+and the client feed see the same final within ~10 ms of each other.
