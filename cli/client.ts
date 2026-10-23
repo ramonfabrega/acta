@@ -228,10 +228,14 @@ export type EventsSocket = { close(): void; readonly closed: Promise<{ code: num
 type BunWebSocketCtor = new (url: string, opts: { headers: Record<string, string> }) => WebSocket;
 const BunWebSocket = WebSocket as unknown as BunWebSocketCtor;
 
+/** `wss://…/m/<id>/events`, without a token: the brain appends `?token=` when it arms Monitor. */
+export function eventsUrl(id: string): string {
+  return `${baseUrl().replace(/^http/, "ws")}/m/${enc(id)}/events`;
+}
+
 /** Open `/m/:id/events` with the bearer in the Authorization header (Bun only). */
 export function events(id: string, h: EventsHandlers): EventsSocket {
-  const url = `${baseUrl().replace(/^http/, "ws")}/m/${enc(id)}/events`;
-  const ws = new BunWebSocket(url, { headers: { authorization: `Bearer ${token()}` } });
+  const ws = new BunWebSocket(eventsUrl(id), { headers: { authorization: `Bearer ${token()}` } });
   let resolveClosed: (v: { code: number; reason: string }) => void = () => {};
   const closed = new Promise<{ code: number; reason: string }>((r) => { resolveClosed = r; });
   ws.addEventListener("open", () => h.open?.());

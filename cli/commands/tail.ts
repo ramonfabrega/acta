@@ -1,11 +1,8 @@
-// `acta tail`: the events socket, one line per frame. Also the brain's manual
-// fallback when the harness Monitor is unavailable.
-import { arg, bool, type Command } from "../args.ts";
+// `acta tail`: the events socket, one frame at a time. Also the brain's manual
+// fallback when the harness Monitor is unavailable (docs/BRAIN.md).
 import { events } from "../client.ts";
 import type { EventFrame } from "../../src/core/schemas.ts";
-import { clock } from "./fmt.ts";
-
-const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
+import { clock, oneLine } from "../fmt.ts";
 
 /** Human form of one frame, always a single line. */
 export function frameLine(f: EventFrame): string {
@@ -23,38 +20,42 @@ export function frameLine(f: EventFrame): string {
   }
 }
 
-export const command: Command = {
-  name: "tail",
-  summary: "Follow a meeting's events socket; one line per frame; exits 0 on `ended`.",
-  usage: "acta tail <id> [--json]",
-  args: [{ name: "id", summary: "Meeting id (stderr of `acta new`).", required: true }],
-  flags: [{ name: "json", type: "boolean", summary: "Print each frame as its JSON object instead of a readable line." }],
-  notes: "Frames are sparse (20-40 an hour): hello, started, participant, paragraph, book, ended. Reconnects with backoff after a drop; a late connect still receives `ended`.",
-  async run(p) {
-    const id = arg(p, "id");
-    const json = bool(p, "json");
+export type FollowEnd = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Yield every frame until `ended`; reconnect with backoff after a drop (a late
+ * connect still receives `ended`). Returns `ok: false` only when the socket
+ * never opened at all. Reconnect notices go to stderr.
+ */
+export async function* follow(id: string): AsyncGenerator<EventFrame, FollowEnd> {
+  let everOpened = false;
+  let delay = 1000;
+  for (;;) {
+    let opened = false;
     let ended = false;
-    let everOpened = false;
-    let delay = 1000;
-    for (;;) {
-      let opened = false;
-      const sock = events(id, {
-        open: () => { opened = everOpened = true; delay = 1000; },
-        frame: (f) => {
-          process.stdout.write(`${json ? JSON.stringify(f) : frameLine(f)}\n`);
-          if (f.type === "ended") { ended = true; sock.close(); }
-        },
-        invalid: (raw, why) => process.stderr.write(`acta tail: unparsed frame (${oneLine(why)}): ${raw.slice(0, 200)}\n`),
-      });
-      const { code, reason } = await sock.closed;
-      if (ended) return 0;
-      if (!everOpened) {
-        process.stderr.write(`acta tail: could not open the events socket (close ${code}${reason ? ` ${reason}` : ""}); check the id and ACTA_TOKEN\n`);
-        return 1;
-      }
-      process.stderr.write(`acta tail: socket closed (${code}${reason ? ` ${reason}` : ""}); reconnecting in ${delay / 1000}s\n`);
-      await Bun.sleep(delay);
-      if (!opened) delay = Math.min(delay * 2, 30_000);
+    const queue: EventFrame[] = [];
+    let wake: (() => void) | null = null;
+    const push = (f: EventFrame) => { queue.push(f); wake?.(); };
+    let closedResult: { code: number; reason: string } | null = null;
+    const sock = events(id, {
+      open: () => { opened = everOpened = true; delay = 1000; },
+      frame: (f) => { push(f); if (f.type === "ended") { ended = true; sock.close(); } },
+      invalid: (raw, why) => process.stderr.write(`acta tail: unparsed frame (${oneLine(why)}): ${raw.slice(0, 200)}\n`),
+      close: (code, reason) => { closedResult = { code, reason }; wake?.(); },
+    });
+    while (closedResult === null || queue.length) {
+      const f = queue.shift();
+      if (f) { yield f; continue; }
+      await new Promise<void>((r) => { wake = r; });
+      wake = null;
     }
-  },
-};
+    if (ended) return { ok: true };
+    const { code, reason } = closedResult as { code: number; reason: string };
+    if (!everOpened) {
+      return { ok: false, reason: `could not open the events socket (close ${code}${reason ? ` ${reason}` : ""}); check the id and ACTA_TOKEN` };
+    }
+    process.stderr.write(`acta tail: socket closed (${code}${reason ? ` ${reason}` : ""}); reconnecting in ${delay / 1000}s\n`);
+    await Bun.sleep(delay);
+    if (!opened) delay = Math.min(delay * 2, 30_000);
+  }
+}
