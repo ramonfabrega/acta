@@ -33,7 +33,7 @@ hidden agent socket joins the room before anyone speaks and streams every
 final utterance, with its speaker, into a Durable Object called **Scribe**.
 Scribe keeps the utterances, closes them into paragraphs on real speaker
 changes (an "mhm" is not a turn), writes the meeting's **book**, and emits
-one sparse event per paragraph on a WebSocket.
+the closed paragraphs on a WebSocket as a digest, at most one a minute.
 
 The **brain** is a Claude Code session on subscription. It arms the harness
 Monitor on Scribe's event socket and writes the book as paragraphs close:

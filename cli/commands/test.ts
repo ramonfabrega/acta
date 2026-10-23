@@ -120,6 +120,8 @@ export type Observed = {
   ended: Extract<EventFrame, { type: "ended" }> | null;
   forcedEnd: boolean;
   meetingId: string;
+  /** Paragraph ids the `paragraphs` digests carried, in order; null when the run did not follow the socket. */
+  digested: string[] | null;
 };
 
 export function assess(f: Fixture, o: Observed): Check[] {
@@ -171,6 +173,16 @@ export function assess(f: Fixture, o: Observed): Check[] {
     if (u.t0 > u.t1) disorder.push(`#${i} t0 > t1`);
   });
   checks.push({ name: "t1 order", level: "required", ok: disorder.length === 0, detail: disorder.length ? disorder.slice(0, 3).join("; ") : `${o.utterances.length} utterances` });
+
+  // 4b. the digests carried every paragraph exactly once, in order (the brain's feed)
+  if (o.digested !== null) {
+    const want = o.paragraphs.map((p) => p.id);
+    const same = o.digested.length === want.length && o.digested.every((id, i) => id === want[i]);
+    checks.push({
+      name: "paragraphs digested", level: "required", ok: same,
+      detail: same ? `${want.length} paragraphs over the digests` : `digests carried ${o.digested.length} ids, the API has ${want.length}${o.digested.length === want.length ? " (order or ids differ)" : ""}`,
+    });
+  }
 
   // 5. utterances.jsonl landed in R2 (only when the run ended the meeting)
   if (o.files !== null) {
@@ -327,10 +339,12 @@ export async function* runTest(opts: TestOptions): AsyncGenerator<Report | Held,
     const key = capabilityOf(m.url);
 
     let hello = false;
+    const digested: string[] = [];
     const sock = events(m.id, {
       frame: (f) => {
         if (f.type === "hello") hello = true;
         if (f.type === "ended") endedFrame = f;
+        if (f.type === "paragraphs") digested.push(...f.paragraphs.map((p) => p.id));
         log(`event ${frameLine(f)}`);
       },
       invalid: (raw, why) => log(`event unparsed (${why.replace(/\s+/g, " ")}): ${raw.slice(0, 200)}`),
@@ -399,7 +413,7 @@ export async function* runTest(opts: TestOptions): AsyncGenerator<Report | Held,
       }
     }
 
-    const checks = assess(fixture, { utterances, paragraphs, files, jsonlLines, ended: endedFrame, forcedEnd, meetingId: m.id });
+    const checks = assess(fixture, { utterances, paragraphs, files, jsonlLines, ended: endedFrame, forcedEnd, meetingId: m.id, digested });
     const rep = report(m.id, checks, paragraphs, relay.seen, tags);
     yield rep;
 

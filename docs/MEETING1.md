@@ -70,3 +70,31 @@ over the room socket, `ended` on last leave, the copy of six tracks into
 R2 within a minute, export and sync outside the repo, doctor clean. The
 first live run of a design that had only been run with two synthetic
 speakers for two minutes at a time.
+
+## What changed after (2026-10-23, `scribe-cadence`)
+
+Measured on this meeting's synced data before the change: 1076 finals,
+309 paragraphs; 62 paragraphs of three words or fewer, 34 of them between
+two paragraphs of the same other speaker; replaying the finals through the
+rule with no backchannel folding gives 445 paragraphs an hour, with a
+six-word bound 153, with a ten-word bound and an 8 s gap 112. No paragraph
+rule reaches twenty to forty on a three-way conversation; that target was
+the wrong layer.
+
+1. **Digest.** The events socket sends paragraphs as one `paragraphs`
+   frame per minute at most, flushed before `ended`; `?each=1`
+   (`acta tail --each`) keeps the per-paragraph frames for a human.
+2. **Deferred close.** A candidate aside has the whole gap for the
+   floor-holder to go on (`continueWithinMs` = `gapMs`), and the bound is
+   five words under three seconds.
+3. **`t0`.** A 3 s silence between a peer's partials starts a new stamp,
+   a stamp older than the words allow is dropped for an estimate, the map
+   is cleared when the agent socket closes, and `t0` is never `t1`
+   (`src/core/timing.ts`).
+4. **Frames.** `join` goes out again after a real leave, and when a
+   transcript registers a peer before its join; `agent` frames
+   (`lost`, `connected`, `gap`) tell the brain about the socket.
+5. **The log travels with the meeting.** Every Scribe log line is also a
+   row; `log.jsonl` lands in R2 with the meeting and again after the
+   copies, so the reconnect at minute 20 and the 1006 close are in the
+   meeting's own record next time, not only here.

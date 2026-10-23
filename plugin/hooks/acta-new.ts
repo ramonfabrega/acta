@@ -74,7 +74,7 @@ export function contextFor(id: string, eventsUrl: string, token: string | null):
     token
       ? "The token in that URL is the operator bearer (ACTA_TOKEN); do not print it or write it anywhere else."
       : `No token was available: run \`passage show ${PASSAGE_ENTRY}\` (or read ACTA_TOKEN) and put the value in place of <ACTA_TOKEN>.`,
-    "Each frame is one notification: hello, started, participant, paragraph, book, ended. Re-arm on every expiry notice (every 30 minutes) until the `ended` frame.",
+    "Each frame is one notification: hello, started, participant, paragraphs (a digest of every paragraph closed since the last one, at most one a minute), agent (the socket to RealtimeKit dropped or came back), book, ended. Re-arm on every expiry notice (every 30 minutes) until the `ended` frame.",
     `If Monitor is unavailable, \`acta tail ${id}\` under /loop is the fallback. Write the book with \`acta book put ${id} <summary|decisions|actions|notes>\` (read it first with \`acta book show ${id}\`).`,
     "The runbook is docs/BRAIN.md in the acta repo; the acta skill carries the command table.",
   ];

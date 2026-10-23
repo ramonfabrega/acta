@@ -41,10 +41,11 @@ reads text, never audio, and runs where the operator's subscription runs.
   socket to `wss://api.realtime.cloudflare.com/agent-ws/v1`
   (`subscriptions=transcript,participant`, ping every 20 s, resume id kept),
   stores finals, closes paragraphs, owns the book, emits sparse events on
-  `/m/<id>/events`, receives the RealtimeKit webhooks, starts the per-track
-  recording on the first human join, and on the last leave closes the agent,
-  writes `utterances.jsonl` to R2, and copies recordings and transcripts
-  from their 7-day URLs into R2.
+  `/m/<id>/events` (paragraphs as a digest, at most one frame a minute),
+  receives the RealtimeKit webhooks, starts the per-track recording on the
+  first human join, keeps its own log, and on the last leave closes the
+  agent, writes `utterances.jsonl` and `log.jsonl` to R2, and copies
+  recordings and transcripts from their 7-day URLs into R2.
 - **Book**: Markdown sections in Scribe, served at `/m/<id>/book`, rendered
   beside the video, pushed to the room over the same WebSocket the page
   already holds. v0: the brain writes, humans read. v1: comments and edits.
@@ -52,8 +53,9 @@ reads text, never audio, and runs where the operator's subscription runs.
   operator runs when wanted. No chat integration in v1.
 - **Brain**: a Claude Code session in THIS repo, on subscription. It arms the
   harness **Monitor** (`ws:` source) on the events socket with `ACTA_TOKEN`
-  as `?token=` and re-arms every 30 minutes; each paragraph event is a
-  notification; it writes the book through the CLI. `/loop` with
+  as `?token=` and re-arms every 30 minutes; each frame (a `paragraphs`
+  digest, a join, an agent-socket drop, `ended`) is a notification; it
+  writes the book through the CLI. `/loop` with
   `acta tail` is the fallback when Monitor is unavailable. The runbook is
   `docs/BRAIN.md`.
   Metered models (AI Gateway) only where a session is too slow: live
@@ -103,14 +105,17 @@ reads text, never audio, and runs where the operator's subscription runs.
 ## The paragraph rule
 
 A paragraph closes on a real speaker change, a gap of about 4 s, or a cap
-near 120 s so a monologue still flows. A final from another speaker of three
-words or fewer and under about 2 s, while the floor-holder continues within
-1.5 s, is a **backchannel**: it stays in the JSONL as its own utterance and
-appears inline in the paragraph text as a bracketed aside, and it does not
-close the turn. Partials never leave Scribe but they do feed the rule: the
-floor-holder's partials keep the turn open, and live partials give a speaker
-a provisional floor before their first final. Events are sparse by design:
-twenty to forty per hour. The harness suppresses a firehose.
+near 120 s so a monologue still flows. A final from another speaker of five
+words or fewer and under about 3 s is a **candidate**; if the floor-holder
+goes on within the gap it is a **backchannel**: it stays in the JSONL as its
+own utterance, appears inline in the paragraph text as a bracketed aside,
+and does not close the turn. The decision waits for what follows, because
+finals arrive a second or two after speech. Partials never leave Scribe but
+they do feed the rule: the floor-holder's partials keep the turn open, and
+live partials give a speaker a provisional floor before their first final.
+Three people close a few hundred paragraphs an hour (measured live), so the
+events socket sends them as a **digest**, at most one frame a minute; the
+harness suppresses a firehose, and the digest is what keeps the feed under it.
 
 ## Data shape
 
