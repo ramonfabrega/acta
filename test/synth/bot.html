@@ -1,0 +1,123 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>acta synth bot</title>
+<script src="https://cdn.jsdelivr.net/npm/@cloudflare/realtimekit@2.0.4/dist/browser.js"></script>
+<style>html,body{margin:0;background:#101010}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="640" height="360"></canvas>
+<script>
+// A synthetic participant (Core SDK only, no UI kit). Fragment parameters:
+//   authToken  participant token from POST /m/:id/join (the token is the auth)
+//   tag        speaker tag, drawn on the camera and sent with every event
+//   relay      optional URL; every event is POSTed there as text/plain JSON
+//   go         optional URL polled after join until it answers {startAt, leaveAt}
+//              (defaults to <relay dir>/go when relay is set)
+//   audio      "mic" (default): at startAt enable the mic, which is Chromium's
+//              fake capture (a WAV) and starts playing on first open;
+//              "file": fetch `wav`, play it through WebAudio as a custom track
+//   wav        WAV URL for audio=file
+// The camera is a canvas scope trace of the outgoing audio, so the tile talks.
+(() => {
+  const p = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, "", location.pathname + location.search); // drop the token from the URL
+  const authToken = p.get("authToken"), tag = p.get("tag") || "bot";
+  const relay = p.get("relay");
+  const go = p.get("go") || (relay ? new URL("go", relay).href : null);
+  const mode = p.get("audio") === "file" ? "file" : "mic";
+  const wavUrl = p.get("wav");
+  const t0 = performance.now(), ms = () => Math.round(performance.now() - t0);
+  const sleep = (n) => new Promise((r) => setTimeout(r, Math.max(0, n)));
+
+  const send = (ev, data) => {
+    const body = JSON.stringify({ tag, ev, at: Date.now(), ms: ms(), data: data ?? null });
+    console.log(body);
+    if (relay) fetch(relay, { method: "POST", headers: { "content-type": "text/plain" }, body }).catch(() => {});
+  };
+  // The fake mic's WAV starts on the first audio open: log every open, so an
+  // early one (before `go`) shows up as the reason speakers drift.
+  const gum = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+  navigator.mediaDevices.getUserMedia = (c) => { send("getUserMedia", { audio: !!(c && c.audio), video: !!(c && c.video) }); return gum(c); };
+  window.addEventListener("error", (e) => send("error", { message: e.message, file: e.filename, line: e.lineno }));
+  window.addEventListener("unhandledrejection", (e) => send("error", { message: String(e.reason && (e.reason.stack || e.reason)) }));
+
+  // Scope trace on a canvas; `feed(node)` connects whatever is being sent.
+  const ac = new AudioContext();
+  const an = ac.createAnalyser(); an.fftSize = 1024;
+  const feed = (node) => node.connect(an);
+  const c = document.getElementById("c"), g = c.getContext("2d"), buf = new Uint8Array(an.fftSize);
+  (function draw() {
+    an.getByteTimeDomainData(buf);
+    g.fillStyle = "#101010"; g.fillRect(0, 0, c.width, c.height);
+    g.strokeStyle = "#2160fd"; g.lineWidth = 3; g.beginPath();
+    for (let i = 0; i < buf.length; i++) { const x = i / buf.length * c.width, y = buf[i] / 255 * c.height; i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke(); g.fillStyle = "#eee"; g.font = "28px sans-serif"; g.fillText(tag, 20, 44);
+    requestAnimationFrame(draw);
+  })();
+
+  async function waitForGo() {
+    if (!go) return { startAt: Date.now(), leaveAt: null };
+    const until = Date.now() + 180000;
+    while (Date.now() < until) {
+      try {
+        const r = await fetch(go + (go.includes("?") ? "&" : "?") + "tag=" + encodeURIComponent(tag));
+        if (r.status === 200) {
+          const j = await r.json();
+          if (typeof j.startAt === "number") return { startAt: j.startAt, leaveAt: typeof j.leaveAt === "number" ? j.leaveAt : null };
+        }
+      } catch { /* relay not up yet */ }
+      await sleep(250);
+    }
+    send("noGo", null);
+    return { startAt: Date.now(), leaveAt: null };
+  }
+
+  (async () => {
+    if (!authToken) { send("fatal", { message: "no authToken in the fragment" }); return; }
+    // audio=file: decode before joining so the start is not late.
+    let decoded = null;
+    if (mode === "file") {
+      if (!wavUrl) { send("fatal", { message: "audio=file needs wav=" }); return; }
+      decoded = await ac.decodeAudioData(await (await fetch(wavUrl)).arrayBuffer());
+      send("wavLoaded", { seconds: decoded.duration });
+    }
+
+    const meeting = await RealtimeKitClient.init({ authToken, defaults: { audio: false, video: false } });
+    send("init", null);
+    meeting.self.on("roomJoined", () => send("joined", { peerId: meeting.self.id }));
+    meeting.self.on("roomLeft", (e) => send("roomLeft", { state: e && e.state }));
+    meeting.self.on("mediaConnectionUpdate", (e) => send("media", e));
+    meeting.ai?.on?.("transcript", (t) => { if (!t.isPartialTranscript) send("final", { name: t.name, text: t.transcript }); });
+
+    try { await meeting.join(); }
+    catch (e) { send("joinFailed", { message: String(e && (e.message || e)) }); return; }
+
+    try { await meeting.self.enableVideo(c.captureStream(15).getVideoTracks()[0]); }
+    catch (e) { send("videoFailed", { message: String(e && (e.message || e)) }); }
+
+    const { startAt, leaveAt } = await waitForGo();
+    await sleep(startAt - Date.now());
+    if (ac.state !== "running") await ac.resume().catch(() => {});
+    try {
+      if (mode === "file") {
+        const dest = ac.createMediaStreamDestination();
+        const src = ac.createBufferSource(); src.buffer = decoded;
+        src.connect(dest); feed(src);
+        await meeting.self.enableAudio(dest.stream.getAudioTracks()[0]);
+        src.start();
+        src.onended = () => send("audioDone", null);
+      } else {
+        await meeting.self.enableAudio(); // first open of the fake mic: the WAV starts here
+        const track = meeting.self.audioTrack;
+        if (track) feed(ac.createMediaStreamSource(new MediaStream([track])));
+      }
+      send("audioOn", { lateMs: Date.now() - startAt, mode });
+    } catch (e) { send("audioFailed", { message: String(e && (e.message || e)) }); }
+
+    if (leaveAt !== null) {
+      await sleep(leaveAt - Date.now());
+      try { await meeting.leave(); send("left", null); }
+      catch (e) { send("leaveFailed", { message: String(e && (e.message || e)) }); }
+    }
+  })().catch((e) => send("fatal", { message: String(e && (e.stack || e)) }));
+})();
+</script>
+</body></html>
