@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { cli, DESCRIPTION } from "../../cli/cli.ts";
 import { capabilityOf, eventsUrl, relativeKey } from "../../cli/client.ts";
 import { renderBook } from "../../cli/commands/book.ts";
+import { summarize } from "../../cli/commands/copy.ts";
 import { diagnose } from "../../cli/commands/doctor.ts";
 import { parseKeywords } from "../../cli/commands/new.ts";
 import { localPath } from "../../cli/commands/sync.ts";
@@ -17,7 +18,7 @@ async function run(argv: string[], env: Record<string, string | undefined> = {})
   return { out, code };
 }
 
-const COMMANDS = ["new", "meetings", "tail", "book put", "book show", "export", "sync", "doctor", "test"];
+const COMMANDS = ["new", "meetings", "tail", "book put", "book show", "export", "copy", "sync", "doctor", "test"];
 
 describe("command table", () => {
   test("--llms lists every V0.md command with its arguments", async () => {
@@ -49,7 +50,7 @@ describe("command table", () => {
 
   test("--help lists every top-level command once", async () => {
     const { out } = await run(["--help"]);
-    for (const c of ["book", "doctor", "export", "meetings", "new", "sync", "tail", "test"]) expect(out).toContain(`\n  ${c} `);
+    for (const c of ["book", "copy", "doctor", "export", "meetings", "new", "sync", "tail", "test"]) expect(out).toContain(`\n  ${c} `);
     expect(out).toContain("skills");
   });
 
@@ -143,6 +144,24 @@ describe("doctor", () => {
     expect(diagnose({ ...base, state: "live", session: { id: "s", startedAt: 0, endedAt: null } }, 4 * HOUR)).toEqual(["live for 4.0 h"]);
     expect(diagnose({ ...base, copies: [{ kind: "recording", key: "k", status: "error", size: null, at: 1 }] }, HOUR)).toEqual(["1 copy error(s): k"]);
     expect(diagnose({ ...base, recording: null }, HOUR)).toEqual(["humans joined but no track recording was started"]);
+  });
+});
+
+describe("copy", () => {
+  test("summarize counts copied and pending rows and names the rest as failed", () => {
+    const row = (key: string, status: string) => ({ kind: "track", key, status, size: null, attempts: 1, error: null });
+    const r = summarize({
+      recording: { id: "r", status: "UPLOADED" },
+      files: 3,
+      copies: [row("meetings/m/recordings/ana.webm", "copied"), row("meetings/m/recordings/ben.webm", "pending"), row("meetings/m/recordings/cy.webm", "failed")],
+    });
+    expect([r.copied, r.pending, r.failed]).toEqual([1, 1, ["meetings/m/recordings/cy.webm"]]);
+  });
+
+  test("copy validates the id before any request", async () => {
+    const { code, out } = await run(["copy"]);
+    expect(code).toBe(1);
+    expect(out).toContain("VALIDATION_ERROR");
   });
 });
 

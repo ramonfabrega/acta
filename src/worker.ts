@@ -221,6 +221,15 @@ app.post("/api/meetings/:id/end", async (c) => {
   return r.state === null ? c.json({ error: "no such meeting" }, 404) : c.json(r);
 });
 
+app.post("/api/meetings/:id/copy", async (c) => {
+  const id = meetingId(c);
+  if (!id) return c.json({ error: "bad meeting id" }, 400);
+  const r = await scribe(c, id).copy();
+  if (!r.ok) return c.json({ error: r.error }, r.status);
+  log("copy.requested", { meeting: id, files: r.answer.files, copied: r.answer.copies.filter((x) => x.status === "copied").length });
+  return c.json(r.answer);
+});
+
 // --- the room (cap) ----------------------------------------------------------------------
 
 app.get("/m/:id", async (c) => {

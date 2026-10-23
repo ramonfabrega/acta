@@ -31,6 +31,7 @@ import {
   type AgentMessage,
   type Book,
   type BookSection,
+  type CopyAnswer,
   type Env,
   type EventFrame,
   type MeetingState,
@@ -369,6 +370,31 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
   async end(reason = "forced"): Promise<{ state: MeetingState | null; utterances: number; paragraphs: number }> {
     if (this.state !== null && this.state !== "ended") await this.endMeeting(reason);
     return { state: this.state, utterances: this.count("utterances"), paragraphs: this.count("paragraphs") };
+  }
+
+  /**
+   * Operator recovery (`acta copy`): re-reads the recording record from
+   * RealtimeKit and copies every file it lists that is not already in R2,
+   * now, in this call. The webhook does this on its own; this is for a
+   * webhook that arrived without URLs, a copy that failed out, or a URL that
+   * expired before the alarm ran. Files already `copied` are left alone.
+   */
+  async copy(): Promise<{ ok: true; answer: CopyAnswer } | { ok: false; status: 404 | 409; error: string }> {
+    if (this.state === null) return { ok: false, status: 404, error: "no such meeting" };
+    const recordingId = this.meta("recordingId");
+    if (!recordingId) return { ok: false, status: 409, error: "no recording was started for this meeting" };
+    const now = Date.now();
+    const detail = await getRecording(rtkConfig(this.cfg), recordingId);
+    this.setMeta("recordingStatus", detail.status);
+    const files = recordingFiles({ id: recordingId, status: detail.status, download_url: detail.download_url, audioDownloadUrl: detail.audio_download_url });
+    this.log("copy.requested", { recordingId, status: detail.status, files: files.length });
+    for (const f of files) this.queueCopy(`recordings/${this.trackFileName(f)}`, f.kind, f.url, now);
+    await this.runCopies(now);
+    await this.arm();
+    const copies = this.sql.exec(`SELECT key, kind, url, status, size, at, attempts, next_at, error FROM copies WHERE key LIKE ? ORDER BY at`, `${this.prefix()}recordings/%`)
+      .toArray().map((r) => CopyRow.extend({ error: z.string().nullable() }).parse(r))
+      .map((r) => ({ kind: r.kind, key: r.key, status: r.status, size: r.size, attempts: r.attempts, error: r.error }));
+    return { ok: true, answer: { recording: { id: recordingId, status: detail.status }, files: files.length, copies } };
   }
 
   // --- inbound sockets (hibernation API) -----------------------------------------
@@ -923,7 +949,9 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
     this.sql.exec(
       `INSERT INTO copies (key, kind, url, status, size, at, attempts, next_at, error) VALUES (?, ?, ?, 'pending', NULL, ?, 0, ?, NULL)
        ON CONFLICT(key) DO UPDATE SET url = excluded.url, status = CASE WHEN copies.status = 'copied' THEN 'copied' ELSE 'pending' END,
-         next_at = CASE WHEN copies.status = 'copied' THEN NULL ELSE excluded.next_at END, at = excluded.at`,
+         next_at = CASE WHEN copies.status = 'copied' THEN NULL ELSE excluded.next_at END, at = excluded.at,
+         attempts = CASE WHEN copies.status = 'copied' THEN copies.attempts ELSE 0 END,
+         error = CASE WHEN copies.status = 'copied' THEN copies.error ELSE NULL END`,
       key, kind, url, now, now,
     );
     this.log("copy.queued", { key, kind });

@@ -60,7 +60,8 @@ reads text, never audio, and runs where the operator's subscription runs.
 - **CLI** (`cli/`, on **incur**): `acta new` (mints the meeting; answers
   the link to share by hand, the id and the events URL), `acta meetings`,
   `acta tail <id>`, `acta book put|show`, `acta export <id>` (Markdown;
-  other targets later), `acta sync` (R2 → `~/.acta/meetings/<id>/`),
+  other targets later), `acta copy <id>` (vendor → R2 now, the recovery
+  for what `doctor` lists), `acta sync` (R2 → `~/.acta/meetings/<id>/`),
   `acta doctor`, `acta test` (synthetic speakers, end to end). The command
   table is `cli/cli.ts` (zod schemas; bodies in `cli/commands/`), so
   `--help`, `--llms`, `--llms-full`, `--mcp` and `acta skills add` (one

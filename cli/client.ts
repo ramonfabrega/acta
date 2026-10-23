@@ -4,6 +4,7 @@
 import { z } from "zod";
 import {
   BookSchema,
+  CopyAnswerSchema,
   EventFrameSchema,
   MeetingStatusSchema,
   ParagraphSchema,
@@ -181,6 +182,9 @@ export const api = {
     request("GET", `/api/meetings/${enc(id)}/files/${rel.split("/").map(enc).join("/")}`),
 
   end: async (id: string) => { await request("POST", `/api/meetings/${enc(id)}/end`); },
+
+  /** Vendor → R2, now: Scribe re-reads the recording record and copies what is missing. */
+  copy: (id: string) => json(CopyAnswerSchema, "POST", `/api/meetings/${enc(id)}/copy`),
 
   book: (id: string): Promise<Book> => json(BookSchema, "GET", `/m/${enc(id)}/book`),
 
