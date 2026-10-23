@@ -12,6 +12,7 @@ import pkg from "../package.json";
 import { BOOK_SECTIONS, BookSectionSchema, WritableBookSectionSchema } from "../src/core/schemas.ts";
 import { DEFAULT_URL, PASSAGE_ENTRY } from "./client.ts";
 import { putSection, showBook } from "./commands/book.ts";
+import { copyRecording } from "./commands/copy.ts";
 import { doctorReport } from "./commands/doctor.ts";
 import { exportMeeting } from "./commands/export.ts";
 import { listMeetings } from "./commands/meetings.ts";
@@ -132,8 +133,25 @@ cli.command("sync", {
   },
 });
 
+cli.command("copy", {
+  description:
+    "Copy a meeting's recording from RealtimeKit into R2 now: Scribe re-reads the recording record and fetches every track not already there. " +
+    "The webhook does this on its own after a meeting; this is the recovery when `acta doctor` lists a recording as not copied (vendor copies expire in seven days). " +
+    "`acta sync` is the other direction, R2 to ~/.acta.",
+  args: z.object({ id: z.string().describe("Meeting id") }),
+  examples: [{ args: { id: "<id>" }, description: "Fetch what doctor listed" }],
+  hint: "Exit 1 when the meeting has no recording, the vendor lists no files yet, or a track failed to copy. `pending` rows are retried by Scribe's alarm.",
+  async *run(c) {
+    const r = await copyRecording(c.args.id);
+    yield r;
+    if (r.files === 0) return c.error({ code: "NO_FILES", message: `recording ${r.recording.id} is ${r.recording.status} and lists no files yet`, retryable: true });
+    if (r.failed.length) return c.error({ code: "COPY_FAILED", message: `${r.failed.length} file(s) failed: ${r.failed.join(", ")}`, retryable: true });
+    return c.ok(undefined, { cta: { description: `${r.copied} of ${r.copies.length} in R2.`, commands: ["doctor", `sync ${c.args.id}`] } });
+  },
+});
+
 cli.command("doctor", {
-  description: "Check the Worker, then list meetings ended without their recordings in R2 or live for more than 3 h. Exit 1 when anything is listed.",
+  description: "Check the Worker, then list meetings ended without their recordings in R2 or live for more than 3 h. Exit 1 when anything is listed. `acta copy <id>` fetches a listed recording.",
   async *run(c) {
     const r = await doctorReport();
     yield r;

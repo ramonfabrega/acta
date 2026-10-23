@@ -269,3 +269,11 @@ export const MeetingStatusSchema = z.object({
   copies: z.array(z.object({ kind: z.string(), key: z.string(), status: z.string(), size: z.number().int().nullable(), at: z.number().int() })),
 });
 export type MeetingStatus = z.infer<typeof MeetingStatusSchema>;
+
+/** `POST /api/meetings/:id/copy`: the recording record as RealtimeKit holds it now, and every copy row after the pass. */
+export const CopyAnswerSchema = z.object({
+  recording: z.object({ id: z.string(), status: z.string() }),
+  files: z.number().int(),
+  copies: z.array(z.object({ kind: z.string(), key: z.string(), status: z.string(), size: z.number().int().nullable(), attempts: z.number().int(), error: z.string().nullable() })),
+});
+export type CopyAnswer = z.infer<typeof CopyAnswerSchema>;

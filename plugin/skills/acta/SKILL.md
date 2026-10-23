@@ -80,11 +80,32 @@ Print the book as Markdown: every section, or one with --section.
 |------|------|---------|-------------|
 | `--section` | `string` |  | One of summary, decisions, actions, notes, transcript |
 
+## acta copy
+
+### acta copy
+
+Copy a meeting's recording from RealtimeKit into R2 now: Scribe re-reads the recording record and fetches every track not already there. The webhook does this on its own after a meeting; this is the recovery when `acta doctor` lists a recording as not copied (vendor copies expire in seven days). `acta sync` is the other direction, R2 to ~/.acta.
+
+#### Arguments
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `id` | `string` | yes | Meeting id |
+
+#### Examples
+
+```sh
+# Fetch what doctor listed
+acta copy <id>
+```
+
+> Exit 1 when the meeting has no recording, the vendor lists no files yet, or a track failed to copy. `pending` rows are retried by Scribe's alarm.
+
 ## acta doctor
 
 ### acta doctor
 
-Check the Worker, then list meetings ended without their recordings in R2 or live for more than 3 h. Exit 1 when anything is listed.
+Check the Worker, then list meetings ended without their recordings in R2 or live for more than 3 h. Exit 1 when anything is listed. `acta copy <id>` fetches a listed recording.
 
 ## acta export
 

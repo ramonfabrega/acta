@@ -64,6 +64,7 @@ acta tail <id>                # one line per frame; Monitor arms the same socket
 acta book put <id> notes -    # the brain writes
 acta test                     # two synthetic speakers, end to end, no humans needed
 acta sync && acta doctor      # pull to ~/.acta/meetings, list what has not landed
+acta copy <id>                # fetch a recording doctor listed from the vendor into R2, now
 ```
 
 The CLI is built on [incur](https://github.com/wevm/incur): every answer

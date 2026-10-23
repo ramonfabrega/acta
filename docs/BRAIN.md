@@ -148,7 +148,8 @@ The `ended` frame carries the reason and the counts. Then, in order:
    uploads, then our webhook copies). `recording … not copied yet
    (UPLOADED)` right after the meeting is the copy in flight; the same line
    the next day is a problem, and after seven days the vendor's copy is
-   gone.
+   gone. `acta copy <id>` fetches it now instead of waiting for the
+   webhook.
 3. Tell the operator where the export is and what the three sections say.
 
 ## Troubleshooting
