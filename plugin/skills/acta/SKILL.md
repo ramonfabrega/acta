@@ -149,7 +149,7 @@ Create a meeting. Answers the room URL to share by hand, the meeting id, and the
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--keywords` | `string` |  | Comma-separated transcription keywords (names, projects) |
+| `--keywords` | `string` |  | Comma-separated vocabulary for the transcriber: names and project words it cannot guess from sound. Up to 200 are accepted; ten to thirty well-chosen ones beat a long list |
 
 #### Examples
 

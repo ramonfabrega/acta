@@ -19,8 +19,11 @@ export const PASSAGE_ENTRY = "tokens/cloudflare/personal/acta/acta-token";
 /** `acta new`, `bun cli/acta.ts new`, `bun run acta new`, in a pipeline or not. `acta test` mints too, but is its own brain. */
 const NEW_RE = /(?:^|[\s;&|(`])(?:bun\s+(?:run\s+)?)?(?:[\w.@~/-]*\/)?acta(?:\.ts)?\s+(?:--?[\w-]+(?:=\S*)?\s+)*new(?=\s|$)/;
 
+/** `acta new --help`, `acta new -h`, or any manifest flag: prints, mints nothing. */
+const NO_MINT_RE = /\s(?:--help|-h|--llms(?:-full)?|--schema|--mcp)(?=\s|$)/;
+
 export function isActaNew(command: string): boolean {
-  return NEW_RE.test(command);
+  return NEW_RE.test(command) && !NO_MINT_RE.test(command);
 }
 
 /** The meeting id from `acta new`'s answer, whatever format incur rendered it in. */
