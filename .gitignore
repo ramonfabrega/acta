@@ -1,0 +1,14 @@
+node_modules/
+dist/
+web/dist/
+.wrangler/
+.dev.vars
+.dev.vars.*
+*.local
+.DS_Store
+
+# Meeting data never lives in the repo: audio, transcripts, books, local syncs.
+meetings/
+
+# The keyword list names people and internal projects. Config, not source.
+keywords.json

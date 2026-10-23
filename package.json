@@ -1,0 +1,18 @@
+{
+  "name": "acta",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Own the meeting: a room with per-speaker transcripts, a live book the brain writes, and recordings you keep.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit",
+    "test": "TZ=UTC bun test"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "wrangler": "^4"
+  }
+}

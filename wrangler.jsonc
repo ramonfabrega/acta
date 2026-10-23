@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "acta",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // The Worker serves the page too. Cloudflare Access guards the hostname;
+  // the Worker verifies the Access JWT (CF_ACCESS_TEAM_DOMAIN / CF_ACCESS_AUD).
+  "routes": [{ "pattern": "acta.ramonfabrega.com", "custom_domain": true }],
+  "assets": { "directory": "web/dist", "binding": "ASSETS" },
+
+  // One Scribe per meeting: agent socket, utterances, paragraphs, the book.
+  "durable_objects": {
+    "bindings": [{ "name": "SCRIBE", "class_name": "Scribe" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Scribe"] }],
+
+  // Our copy of everything RealtimeKit deletes after seven days.
+  "r2_buckets": [{ "binding": "MEETINGS", "bucket_name": "acta-meetings" }],
+
+  // Batch re-transcription (Whisper) and small models; nova-3 live is
+  // RealtimeKit's own call and bills to this account as Workers AI neurons.
+  "ai": { "binding": "AI" },
+
+  "vars": {
+    // Non-secret identifiers. Secrets go through `wrangler secret put`:
+    //   RTK_API_TOKEN   Cloudflare API token with Realtime admin scope
+    //   WEBHOOK_SECRET  RealtimeKit webhook signing secret
+    //   EVENTS_TOKEN    bearer for the per-meeting events socket the brain arms
+    "RTK_APP_ID": "",
+    "CF_ACCESS_TEAM_DOMAIN": "",
+    "CF_ACCESS_AUD": ""
+  }
+}
