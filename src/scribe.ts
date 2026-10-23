@@ -379,20 +379,31 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
    * webhook that arrived without URLs, a copy that failed out, or a URL that
    * expired before the alarm ran. Files already `copied` are left alone.
    */
-  async copy(): Promise<{ ok: true; answer: CopyAnswer } | { ok: false; status: 404 | 409; error: string }> {
+  async copy(): Promise<{ ok: true; answer: CopyAnswer } | { ok: false; status: 404 | 409 | 502; error: string }> {
     if (this.state === null) return { ok: false, status: 404, error: "no such meeting" };
     const recordingId = this.meta("recordingId");
     if (!recordingId) return { ok: false, status: 409, error: "no recording was started for this meeting" };
     const now = Date.now();
-    const detail = await getRecording(rtkConfig(this.cfg), recordingId);
+    // An RtkError does not survive the RPC boundary as itself; answer it here so the operator sees the vendor's message.
+    let detail: Awaited<ReturnType<typeof getRecording>>;
+    try {
+      detail = await getRecording(rtkConfig(this.cfg), recordingId);
+    } catch (e) {
+      const msg = e instanceof RtkError ? `realtimekit: ${e.vendorMessage}` : String(e);
+      this.log("copy.recording_detail_failed", { recordingId, error: msg });
+      return { ok: false, status: 502, error: msg };
+    }
     this.setMeta("recordingStatus", detail.status);
     const files = recordingFiles({ id: recordingId, status: detail.status, download_url: detail.download_url, audioDownloadUrl: detail.audio_download_url });
     this.log("copy.requested", { recordingId, status: detail.status, files: files.length });
     for (const f of files) this.queueCopy(`recordings/${this.trackFileName(f)}`, f.kind, f.url, now);
     await this.runCopies(now);
     await this.arm();
-    const copies = this.sql.exec(`SELECT key, kind, url, status, size, at, attempts, next_at, error FROM copies WHERE key LIKE ? ORDER BY at`, `${this.prefix()}recordings/%`)
+    // DO SQLite rejects a LIKE pattern this long ("pattern too complex"); filter here.
+    const under = `${this.prefix()}recordings/`;
+    const copies = this.sql.exec(`SELECT key, kind, url, status, size, at, attempts, next_at, error FROM copies ORDER BY at`)
       .toArray().map((r) => CopyRow.extend({ error: z.string().nullable() }).parse(r))
+      .filter((r) => r.key.startsWith(under))
       .map((r) => ({ kind: r.kind, key: r.key, status: r.status, size: r.size, attempts: r.attempts, error: r.error }));
     return { ok: true, answer: { recording: { id: recordingId, status: detail.status }, files: files.length, copies } };
   }
