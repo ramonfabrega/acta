@@ -49,11 +49,16 @@ field gets. The composite endpoint `POST /recordings` accepts the same
 So direct-to-R2 exists for composite recordings and not for track
 recordings, and the webhook copy stays. The plumbing that passed the
 config from Scribe was reverted the same evening; nothing ships for this.
-Still untested: the dashboard's Recordings → Setup Storage, which the
-custom-storage guide says applies to "all meetings". If it also covers
-track recordings, that is a dashboard setting on the operator's side, no
-code, and one test meeting shows it; the R2 key then never touches our
-Worker, which is the better shape anyway.
+The dashboard's Recordings → Setup Storage (provider cloudflare, an R2
+token scoped to `acta-meetings`, path `rtk/recordings`), which the
+custom-storage guide says applies to "all meetings", was set the same
+evening and tested with one synthetic meeting: the track recording went to
+the vendor's bucket as before (`storage_config: null` on the record, a
+7-day `download_url` per track, the agent's silent track included),
+Scribe's webhook copy landed both human tracks under `meetings/<id>/`, and
+nothing appeared under `rtk/` in the bucket, then or after two more
+minutes. The setting covers composite recordings only. Lever 2 is closed
+on both routes as of 10-23; the webhook copy is the path.
 
 **What it would have bought:** the recording row from $0.52 to $0.09 if
 the raw-RTP rate applies (still unverified, bill only), and the end of the
