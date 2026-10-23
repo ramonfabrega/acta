@@ -59,15 +59,35 @@ home of the notes; chat tools, docs tools and plain Markdown are exports.
 bun install
 bun run setup                 # presets, webhook, secrets check (idempotent)
 bun run deploy                # or merge to main once Workers Builds is connected
-acta new "dev sync"           # prints the room link; the session that ran it is the brain
-acta tail <id>                # one line per paragraph; Monitor arms the same socket
+acta new "dev sync"           # answers the room link, the id and the events socket; the session that ran it is the brain
+acta tail <id>                # one line per frame; Monitor arms the same socket (docs/BRAIN.md)
 acta book put <id> notes -    # the brain writes
 acta test                     # two synthetic speakers, end to end, no humans needed
 acta sync && acta doctor      # pull to ~/.acta/meetings, list what has not landed
 ```
 
-`acta --llms` prints the whole command table. `ACTA_URL` and `ACTA_TOKEN`
-configure the CLI; the token is the one operator bearer, kept in passage.
+The CLI is built on [incur](https://github.com/wevm/incur): every answer
+is data (TOON by default, `--json`, `--format yaml|md|jsonl`),
+`acta --llms` prints the command index and `acta --llms-full` the whole
+manifest, `acta skills add` installs one skill per verb, and `acta --mcp`
+serves the same commands as MCP tools. `ACTA_URL` and `ACTA_TOKEN`
+configure it; the token is the one operator bearer, kept in passage.
+
+## The plugin
+
+`plugin/` is a Claude Code plugin and the repo root is its marketplace: the
+command table as a skill (generated from `--llms-full`, a test fails on
+drift) and a `PostToolUse` hook that, after `acta new`, hands the session
+the exact Monitor call for the meeting's events socket, so the session
+that minted the meeting becomes its brain. `docs/BRAIN.md` is that
+session's runbook.
+
+```
+/plugin install acta --marketplace ramonfabrega/acta
+```
+
+In the fleet, the checkout is the installed copy: `claude plugin marketplace
+add ~/code/fun/acta`, then `claude plugin install acta@acta`.
 
 ## Public repo
 

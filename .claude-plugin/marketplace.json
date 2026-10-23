@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "acta",
+  "description": "acta — own the meeting: the CLI as a skill, and the hook that makes the session that mints a meeting its brain",
+  "owner": { "name": "Ramon Fabrega" },
+  "plugins": [
+    {
+      "name": "acta",
+      "description": "The acta CLI as a skill (mint a room, tail its events, write the book, export, sync recordings, doctor) and a PostToolUse hook that, after `acta new`, tells the session to arm Monitor on the meeting's events socket.",
+      "category": "productivity",
+      "source": "./plugin"
+    }
+  ]
+}

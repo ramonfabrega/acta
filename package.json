@@ -1,21 +1,25 @@
 {
   "name": "acta",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Own the meeting: a room with per-speaker transcripts, a live book the brain writes, and recordings you keep.",
-  "bin": { "acta": "cli/acta.ts" },
+  "bin": {
+    "acta": "cli/acta.ts"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail --format pretty",
     "typecheck": "tsc --noEmit",
-    "test": "TZ=UTC bun test test/core",
+    "test": "TZ=UTC bun test",
     "setup": "bun scripts/setup.ts",
-    "acta": "bun cli/acta.ts"
+    "acta": "bun cli/acta.ts",
+    "plugin:skill": "bun scripts/skill.ts"
   },
   "dependencies": {
     "hono": "^4.13.13",
+    "incur": "0.7.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

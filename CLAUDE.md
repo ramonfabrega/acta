@@ -11,7 +11,8 @@ Start a session with `bun cli/acta.ts --llms` (`acta --llms` after
 `bun link`). This file is the map; `docs/V0.md` is the contract everything
 is built to (routes, shapes, the paragraph machine, vendor facts measured
 live); `docs/SPIKE.md` is the log of the first evening; `docs/DESIGN.md` the
-decisions and what they beat. v0 is deployed; see README for the loop.
+decisions and what they beat; `docs/BRAIN.md` the runbook for the session
+that runs a meeting. v0 is deployed; see README for the loop.
 
 ## Thesis
 
@@ -50,20 +51,31 @@ reads text, never audio, and runs where the operator's subscription runs.
   operator runs when wanted. No chat integration in v1.
 - **Brain**: a Claude Code session in THIS repo, on subscription. It arms the
   harness **Monitor** (`ws:` source) on the events socket with `ACTA_TOKEN`
-  and re-arms every 30 minutes; each paragraph event is a notification; it
-  writes the book through the CLI. `/loop` is the fallback when Monitor is
-  unavailable.
+  as `?token=` and re-arms every 30 minutes; each paragraph event is a
+  notification; it writes the book through the CLI. `/loop` with
+  `acta tail` is the fallback when Monitor is unavailable. The runbook is
+  `docs/BRAIN.md`.
   Metered models (AI Gateway) only where a session is too slow: live
   caption translation, utterance tagging. Neither is v1.
-- **CLI** (`cli/`): `acta new` (mints the meeting and prints the link to
-  share by hand), `acta meetings`, `acta tail <id>`, `acta book put|show`,
-  `acta export <id>` (Markdown; other targets later), `acta sync` (R2 →
-  `~/.acta/meetings/<id>/`), `acta doctor`, `acta test` (synthetic
-  speakers, end to end). Agent-first; `--llms` is generated from the
-  command table. v0 ships a hand-rolled parser; the intended base is
-  **incur**, which also generates per-verb skills (`acta skills add`), and
-  porting to it precedes the plugin. The session that runs `acta new` is
-  the meeting's brain: it already holds the id when it arms Monitor.
+- **CLI** (`cli/`, on **incur**): `acta new` (mints the meeting; answers
+  the link to share by hand, the id and the events URL), `acta meetings`,
+  `acta tail <id>`, `acta book put|show`, `acta export <id>` (Markdown;
+  other targets later), `acta sync` (R2 → `~/.acta/meetings/<id>/`),
+  `acta doctor`, `acta test` (synthetic speakers, end to end). The command
+  table is `cli/cli.ts` (zod schemas; bodies in `cli/commands/`), so
+  `--help`, `--llms`, `--llms-full`, `--mcp` and `acta skills add` (one
+  skill per verb) are generated from it. Every answer is data; `doctor`,
+  `sync` and `test` stream their report then exit 1 through incur's error
+  envelope when something failed. The session that runs `acta new` is the
+  meeting's brain: it already holds the id when it arms Monitor.
+- **Plugin** (`plugin/`; the repo root is the marketplace): the command
+  table as one skill, generated from `--llms-full` by `scripts/skill.ts`
+  (`bun run plugin:skill`; `test/plugin` fails on drift), and a
+  `PostToolUse` hook on `Bash` that, after `acta new`, reads the id off the
+  answer and the token off passage and hands the session the exact Monitor
+  call as `additionalContext`. A hook cannot arm Monitor; the session
+  does. Installed the fleet way: a directory marketplace in dotfiles
+  `settings.json`, the checkout is the installed copy, `/reload-plugins`.
 - **lore**: a source adapter on lore's side reads `~/.acta/meetings`; one
   meeting indexes as one session-shaped unit, speaker as an authorship
   field. lore also supplies the day-one `keywords` from the entity names it

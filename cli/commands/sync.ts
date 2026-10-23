@@ -2,9 +2,8 @@
 import { mkdir, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
-import { type Command } from "../args.ts";
 import { api, relativeKey } from "../client.ts";
-import { bytes } from "./fmt.ts";
+import { bytes } from "../fmt.ts";
 
 /** `ACTA_HOME` (default `~/.acta`) + `/meetings`. */
 export function meetingsRoot(): string {
@@ -23,49 +22,44 @@ async function sizeOf(path: string): Promise<number | null> {
   try { return (await stat(path)).size; } catch { return null; }
 }
 
-async function syncOne(root: string, id: string): Promise<{ got: number; skipped: number; bytes: number }> {
+async function syncOne(root: string, id: string): Promise<{ fetched: number; unchanged: number; bytes: number }> {
   const files = await api.files(id);
-  let got = 0, skipped = 0, total = 0;
+  let fetched = 0, unchanged = 0, total = 0;
   for (const f of files) {
     const rel = relativeKey(id, f.key);
     const path = localPath(root, id, rel);
     if (!path) { process.stderr.write(`skip unsafe key ${f.key}\n`); continue; }
-    if ((await sizeOf(path)) === f.size) { skipped++; continue; }
+    if ((await sizeOf(path)) === f.size) { unchanged++; continue; }
     await mkdir(dirname(path), { recursive: true });
     const res = await api.file(id, rel);
     const tmp = `${path}.part`;
     const n = await Bun.write(tmp, res);
     await rename(tmp, path);
     if (n !== f.size) process.stderr.write(`warn ${rel}: listed ${f.size} B, got ${n} B\n`);
-    got++; total += n;
+    fetched++; total += n;
     process.stderr.write(`${id}/${rel} ${bytes(n)}\n`);
   }
-  return { got, skipped, bytes: total };
+  return { fetched, unchanged, bytes: total };
 }
 
-export const command: Command = {
-  name: "sync",
-  summary: "Copy a meeting's R2 files (or every meeting's) to ~/.acta/meetings/<id>/, skipping same-size files.",
-  usage: "acta sync [id]",
-  args: [{ name: "id", summary: "Meeting id; omitted syncs every listed meeting." }],
-  flags: [],
-  notes: "ACTA_HOME overrides ~/.acta. Prints the local directory of each meeting on stdout.",
-  async run(p) {
-    const root = meetingsRoot();
-    const ids = p.args.id ? [p.args.id] : (await api.meetings()).map((m) => m.id);
-    let failed = 0;
-    for (const id of ids) {
-      try {
-        const r = await syncOne(root, id);
-        process.stdout.write(`${join(root, id)}\n`);
-        process.stderr.write(`${id}: ${r.got} fetched (${bytes(r.bytes)}), ${r.skipped} unchanged\n`);
-      } catch (e) {
-        // One meeting failing must not stop the rest of a full sync.
-        if (ids.length === 1) throw e;
-        failed++;
-        process.stderr.write(`${id}: ${e instanceof Error ? e.toString() : String(e)}\n`);
-      }
+export type SyncRow =
+  | { id: string; dir: string; fetched: number; unchanged: number; bytes: number }
+  | { id: string; dir: string; error: string };
+
+/** One row per meeting as it lands; returns how many failed. One failing meeting never stops a full sync. */
+export async function* syncMeetings(id: string | undefined): AsyncGenerator<SyncRow, { root: string; failed: string[] }> {
+  const root = meetingsRoot();
+  const ids = id ? [id] : (await api.meetings()).map((m) => m.id);
+  const failed: string[] = [];
+  for (const mid of ids) {
+    const dir = join(root, mid);
+    try {
+      yield { id: mid, dir, ...(await syncOne(root, mid)) };
+    } catch (e) {
+      if (ids.length === 1) throw e;
+      failed.push(mid);
+      yield { id: mid, dir, error: e instanceof Error ? e.toString() : String(e) };
     }
-    return failed ? 1 : 0;
-  },
-};
+  }
+  return { root, failed };
+}
