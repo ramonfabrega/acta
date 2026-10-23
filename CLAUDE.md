@@ -130,7 +130,10 @@ a real meeting.
 3. Screen share in the web `RtkMeeting` needs no setup.
 4. No documented or observed cap on `keywords` (four tested).
 
-Also observed: `participant.join` redelivered once with the same `peer_id`
-(at-least-once is real; handlers key on `peer_id`); partials arrive two to
-four times a second per speaker and must never leave Scribe; the agent feed
-and the client feed see the same final within ~10 ms of each other.
+Also observed: the first join from a fresh page failed in the browser
+("network may be blocking", Firefox error 0014) while the agent feed saw
+`participant.join`; the retry connected and produced a second `join` with
+the **same `peer_id`** and no `leave` between, so joins are not unique per
+peer and handlers key on `peer_id` idempotently. Partials arrive two to four
+times a second per speaker and must never leave Scribe; the agent feed and
+the client feed see the same final within ~10 ms of each other.

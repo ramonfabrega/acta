@@ -82,14 +82,22 @@ created by API; 26 agent frames for 5 finals in 18 s of speech.
   **agent's** join: the spike's first meeting uploaded a recording of one
   hidden participant and silence. Per-track is the explicit
   Start-track-recording call on the first human join.
-- `participant.join` can arrive twice for one `peer_id` (seen live, 107 s
-  apart, no leave between). Key everything on `peer_id`, idempotently.
+- `participant.join` can arrive twice for one `peer_id` with no leave
+  between: the browser's first join attempt registered with signaling, failed
+  on media, and the retry reused the peer (seen 2/2 sessions, Firefox and
+  Chrome, 36–107 s apart). Key everything on `peer_id`, idempotently, and
+  do not start recording or count a human present until a transcript or a
+  second signal confirms media.
 - The agent feed's timestamps are second-granular server clocks. The
   paragraph rule's 1.5 s and 2 s thresholds run on Scribe's own receipt
   clock; precise timing comes from the batch pass over stored tracks.
-- Browsers: first join in Firefox hung on "joining" (error 0014) until mic
-  and camera permissions were granted; the kit's right sidebar (participants,
-  chat, transcript) did not open there. Chrome is the tested path.
+- Browsers: the first join from a fresh page failed in both Firefox (error
+  0014) and Chrome ("your network may be blocking this connection"); the
+  second click connected every time. Cause not yet isolated (ICE/UDP on the
+  operator's network vs. the kit); compare against
+  `examples.realtime.cloudflare.com/meeting?demo=Default` from the same
+  network. The kit's right sidebar (participants, chat, transcript) did not
+  open in Firefox.
 - A hidden agent still bills and keeps the session alive. Close it on the
   last leave or the meeting never ends.
 - Recordings cannot be delivered to R2 directly. The webhook copy is the
