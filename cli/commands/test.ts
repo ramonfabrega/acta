@@ -390,9 +390,10 @@ function report(checks: Check[], paragraphs: Paragraph[], bot: BotEvent[], tags:
   process.stdout.write("\n" + table(["check", "result", "detail"], checks.map((c) => [c.name, mark(c), c.detail])));
   process.stdout.write("\nparagraphs\n");
   for (const p of paragraphs) {
-    const asides = p.asides.map((a) => ` [${a.speaker}: ${a.text}]`).join("");
+    // `text` already carries the asides inline; count them rather than repeat them.
     const text = p.text.replace(/\s+/g, " ");
-    process.stdout.write(`  ${clock(p.t0)} ${p.speaker}: ${text.length > 110 ? `${text.slice(0, 110)}…` : text}${asides}\n`);
+    const n = p.asides.length ? ` (${p.asides.length} aside${p.asides.length > 1 ? "s" : ""})` : "";
+    process.stdout.write(`  ${clock(p.t0)} ${p.speaker}: ${text.length > 140 ? `${text.slice(0, 140)}…` : text}${n}\n`);
   }
   process.stdout.write("\nbots\n" + table(["tag", "joined", "audio late", "client finals", "errors"], tags.map((t) => {
     const mine = bot.filter((e) => e.tag === t);
