@@ -91,13 +91,17 @@ created by API; 26 agent frames for 5 finals in 18 s of speech.
 - The agent feed's timestamps are second-granular server clocks. The
   paragraph rule's 1.5 s and 2 s thresholds run on Scribe's own receipt
   clock; precise timing comes from the batch pass over stored tracks.
-- Browsers: the first join from a fresh page failed in both Firefox (error
-  0014) and Chrome ("your network may be blocking this connection"); the
-  second click connected every time. Cause not yet isolated (ICE/UDP on the
-  operator's network vs. the kit); compare against
-  `examples.realtime.cloudflare.com/meeting?demo=Default` from the same
-  network. The kit's right sidebar (participants, chat, transcript) did not
-  open in Firefox.
+- Browsers: Chrome and Safari join first try once mic permission is granted
+  (eight clean joins in a row, plus a headless Chromium participant from the
+  studio box). **Firefox** fails the first join (error 0014 / "network may be
+  blocking"), fails the retry too, and needs a page reload; the server sees a
+  `participant.join` for each failed attempt. Chrome and Safari are the
+  tested paths; the join gate should ask for the mic before handing the
+  token to `<rtk-meeting>`.
+- The kit's sidebar (chat, participants, transcript) toggles but never shows
+  if the page overrides `rtk-meeting`'s host style: the host is
+  `display:flex; position:fixed; inset:0`. Do not set `display:block` on it;
+  size the element with `height` only, or leave it fixed.
 - A hidden agent still bills and keeps the session alive. Close it on the
   last leave or the meeting never ends.
 - Recordings cannot be delivered to R2 directly. The webhook copy is the
