@@ -191,6 +191,115 @@ describe("paragraphs", () => {
     expect(m.nextDeadline()).toBe(6000);
   });
 
+  test("a backchannel before the first final is held by the floor-holder's partials (live run, bug 1)", () => {
+    seq = 0;
+    const m = createParagraphs();
+    const closed = [];
+    for (let t = 1000; t < 3400; t += 300) m.partial("u_ana", t);
+    m.partial("u_ben", 2000);
+    m.partial("u_ben", 3000);
+    closed.push(...m.push(u("ben", "Yes. Sounds good.", 2000, 3400)));
+    for (let t = 3400; t < 9800; t += 300) {
+      m.partial("u_ana", t);
+      closed.push(...m.flush(t)); // alarms firing meanwhile change nothing
+    }
+    const opening = "Buenos días a todos, gracias por venir. Hoy vamos a revisar el plan.";
+    closed.push(...m.push(u("ana", opening, 1000, 9800)));
+    expect(closed).toEqual([]);
+    expect(m.flush(13_800)).toMatchObject([{
+      speaker: "ana", t0: 1000, t1: 9800,
+      text: `${opening} [ben: Yes. Sounds good.]`,
+      utterances: [1],
+      asides: [{ speaker: "ben", text: "Yes. Sounds good.", t0: 2000 }],
+    }]);
+  });
+
+  test("three speakers: two short finals during the opening sentence become asides in order", () => {
+    seq = 0;
+    const m = createParagraphs();
+    for (let t = 1000; t < 9800; t += 300) {
+      m.partial("u_ana", t);
+      if (t === 2800) m.push(u("ben", "yes", 2000, 2800));
+      if (t === 4000) m.push(u("cara", "sounds good", 3200, 4000));
+      expect(m.flush(t)).toEqual([]);
+    }
+    expect(m.push(u("ana", "welcome everyone to the review", 1000, 9800))).toEqual([]);
+    expect(m.flush(13_800)).toMatchObject([{
+      speaker: "ana",
+      text: "welcome everyone to the review [ben: yes] [cara: sounds good]",
+      utterances: [2],
+      asides: [{ speaker: "ben" }, { speaker: "cara" }],
+    }]);
+  });
+
+  test("a provisional floor that never finals leaves the candidate as its own paragraph", () => {
+    seq = 0;
+    const m = createParagraphs();
+    for (let t = 1000; t <= 3000; t += 500) m.partial("u_ana", t);
+    expect(m.push(u("ben", "yes", 2600, 3400))).toEqual([]);
+    expect(m.nextDeadline()).toBe(7400);
+    expect(m.flush(7399)).toEqual([]);
+    expect(m.flush(7400)).toMatchObject([{ speaker: "ben", text: "yes", utterances: [0], asides: [] }]);
+    expect(m.nextDeadline()).toBeNull();
+  });
+
+  test("with no live partials from anyone else a short first final opens its own paragraph", () => {
+    seq = 0;
+    const m = createParagraphs();
+    m.partial("u_ana", 1000); // gone quiet long before ben speaks
+    m.push(u("ben", "hello", 9000, 9600));
+    expect(m.state().open).toMatchObject({ speaker: "ben" });
+    expect(m.state().candidates).toEqual([]);
+  });
+
+  test("a resolved aside appears once when the paragraph later closes (live run, bug 2)", () => {
+    seq = 0;
+    const m = createParagraphs();
+    m.push(u("ana", "Necesitamos una revisión de seguridad antes", 0, 5000));
+    m.push(u("ben", "Agreed.", 5200, 5800));
+    m.partial("u_ana", 6500);
+    m.push(u("ana", "de abrir el acceso a más usuarios.", 6500, 9000));
+    for (let t = 9000; t <= 13_000; t += 500) m.partial("u_ben", t);
+    const [p, ...rest] = m.flush(13_000);
+    expect(rest).toEqual([]);
+    expect(p?.text).toBe("Necesitamos una revisión de seguridad antes [ben: Agreed.] de abrir el acceso a más usuarios.");
+    expect(p?.text.match(/\[ben: Agreed\.\]/g)).toHaveLength(1);
+    expect(p?.asides).toHaveLength(1);
+    expect(m.state()).toMatchObject({ open: null, candidates: [], floor: null });
+  });
+
+  test("a candidate committed at close is not inlined again by the next paragraph", () => {
+    seq = 0;
+    const m = createParagraphs();
+    m.push(u("ana", "so the plan is", 0, 5000));
+    m.push(u("ben", "mhm", 5200, 5800));
+    m.partial("u_ana", 6000); // answered in time, then the final is late
+    const [p] = m.flush(10_000);
+    expect(p).toMatchObject({ text: "so the plan is [ben: mhm]", asides: [{ speaker: "ben" }] });
+    expect(m.push(u("ana", "we ship friday", 6000, 11_000))).toEqual([]);
+    expect(m.flush(15_000)).toMatchObject([{ text: "we ship friday", asides: [] }]);
+  });
+
+  test("an aside overlapping the floor-holder's utterance goes after it, one in a pause before it", () => {
+    seq = 0;
+    const m = createParagraphs();
+    m.push(u("ana", "first", 0, 3000));
+    m.push(u("ben", "right", 3200, 3700)); // in the pause
+    m.partial("u_ana", 3900);
+    m.push(u("cara", "yes", 4500, 5000)); // while ana talks
+    m.push(u("ana", "second", 3900, 6000));
+    expect(m.flush(10_000)[0]?.text).toBe("first [ben: right] second [cara: yes]");
+  });
+
+  test("a state without the newer fields still restores", () => {
+    const m = createParagraphs();
+    m.restore({
+      v: 1, candidates: [], floor: { since: 1, last: 2 },
+      open: { id: "p1", t0: 0, t1: 5, speaker: "ana", userId: "u_ana", pieces: ["hi"], utterances: [0], asides: [], gapFrom: 5 },
+    });
+    expect(m.state().open?.asideSeqs).toEqual([]);
+  });
+
   test("empty finals are ignored", () => {
     seq = 0;
     const m = createParagraphs();
