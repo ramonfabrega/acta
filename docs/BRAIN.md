@@ -42,10 +42,12 @@ Monitor({
 })
 ```
 
-The first frame is `hello` (title, state, since). Arm before anyone joins:
-the agent participant is already in the room from the moment the meeting
-exists, and the first human join starts the per-track recording and the
-`started` frame. The token is in the Monitor URL because Monitor cannot set
+The first frame is `hello` (title, state, since). Its state is already
+`live`: the agent participant joins the room the moment the meeting is
+minted, and that join starts the room session (`started`). A meeting
+nobody joins ends itself after 30 minutes. The first human is the first
+`participant` join, and that is what starts the per-track recording. Arm
+before it. The token is in the Monitor URL because Monitor cannot set
 headers; it is in the transcript for the same reason. Do not print it
 anywhere else, and do not write it into a file.
 
@@ -78,9 +80,9 @@ notification:
 
 | frame | when | what to do |
 | --- | --- | --- |
-| `hello` | on connect | confirm the id and title |
-| `started` | the first human joined | nothing; the recording is on |
-| `participant` | a join or a leave | note who is in the room |
+| `hello` | on connect | confirm the id and title; state is `live` from the mint |
+| `started` | the room session began (the agent's join, at mint; before you connect, usually) | nothing |
+| `participant` | a join or a leave | note who is in the room; the first human join starts the recording |
 | `paragraph` | a turn closed (speaker change, ~4 s gap, ~120 s cap) | read it; write when it changes the book |
 | `book` | a section was written | nothing (it is your own write echoed) |
 | `ended` | the last human left | the final pass, below |

@@ -45,7 +45,7 @@ cli.command("new", {
   description: "Create a meeting. Answers the room URL to share by hand, the meeting id, and the events socket URL the brain arms Monitor on.",
   args: z.object({ title: z.string().describe("Meeting title (quote it)") }),
   options: z.object({
-    keywords: z.string().optional().describe("Comma-separated transcription keywords (names, projects)"),
+    keywords: z.string().optional().describe("Comma-separated vocabulary for the transcriber: names and project words it cannot guess from sound. Up to 200 are accepted; ten to thirty well-chosen ones beat a long list"),
   }),
   // incur renders example values verbatim, so the quotes a shell needs are part of the value.
   examples: [

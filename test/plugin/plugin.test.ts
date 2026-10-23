@@ -73,6 +73,8 @@ describe("acta-new hook", () => {
       "acta new x | tee out.txt",
     ]) expect(isActaNew(c)).toBe(true);
     for (const c of ["acta meetings", "acta test", "acta tail new", "echo acta-new", "actanew x", "acta newer x", "git commit -m 'acta new'"]) expect(isActaNew(c)).toBe(false);
+    // Found live 2026-10-23: `acta new --help` fired the hook. Help and manifest flags mint nothing.
+    for (const c of ["acta new --help", "acta new -h", "acta --help new", "acta new x --llms", "bun cli/acta.ts new --schema"]) expect(isActaNew(c)).toBe(false);
   });
 
   test("reads the meeting id off the URL, a TOON line, or JSON", () => {
