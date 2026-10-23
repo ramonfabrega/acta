@@ -4,10 +4,13 @@ Own the meeting. A video room for the people you can get into it, with every
 speaker on their own track, a book that fills in while you talk, and the
 recordings kept where you can re-read them when a better model comes along.
 
-**Status: spike, seeded 2026-10-23. Nothing is deployed yet.** The plan, the
-decisions and the rejected alternatives are in `docs/DESIGN.md`; the
-evening-one checklist is `docs/SPIKE.md`. *Acta* is Spanish for the minutes
-of a meeting.
+**Status: v0, deployed 2026-10-23.** A meeting can be minted, joined, spoken
+in two languages, transcribed per speaker into paragraphs, and ends with
+the utterances, the book and one audio track per participant in our own
+R2. The plan, the decisions and the rejected alternatives are in
+`docs/DESIGN.md`; the evening-one checklist and what it found is
+`docs/SPIKE.md`; the shapes everything is built to are `docs/V0.md`. *Acta*
+is Spanish for the minutes of a meeting.
 
 ## Why build this when meeting note-takers exist
 
@@ -52,8 +55,19 @@ home of the notes; chat tools, docs tools and plain Markdown are exports.
 
 ## Running it
 
-Not yet. See `docs/SPIKE.md` for the setup order and the three checks that
-decide the first evening.
+```
+bun install
+bun run setup                 # presets, webhook, secrets check (idempotent)
+bun run deploy                # or merge to main once Workers Builds is connected
+acta new "dev sync"           # prints the room link; the session that ran it is the brain
+acta tail <id>                # one line per paragraph; Monitor arms the same socket
+acta book put <id> notes -    # the brain writes
+acta test                     # two synthetic speakers, end to end, no humans needed
+acta sync && acta doctor      # pull to ~/.acta/meetings, list what has not landed
+```
+
+`acta --llms` prints the whole command table. `ACTA_URL` and `ACTA_TOKEN`
+configure the CLI; the token is the one operator bearer, kept in passage.
 
 ## Public repo
 

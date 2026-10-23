@@ -4,15 +4,24 @@
   "private": true,
   "type": "module",
   "description": "Own the meeting: a room with per-speaker transcripts, a live book the brain writes, and recordings you keep.",
+  "bin": { "acta": "cli/acta.ts" },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail",
+    "tail": "wrangler tail --format pretty",
     "typecheck": "tsc --noEmit",
-    "test": "TZ=UTC bun test"
+    "test": "TZ=UTC bun test test/core",
+    "setup": "bun scripts/setup.ts",
+    "acta": "bun cli/acta.ts"
+  },
+  "dependencies": {
+    "hono": "^4.13.13",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261023.1",
+    "@types/bun": "latest",
     "typescript": "^5",
-    "wrangler": "^4"
+    "wrangler": "^4.152.0"
   }
 }

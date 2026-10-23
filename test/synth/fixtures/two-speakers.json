@@ -1,0 +1,21 @@
+{
+  "title": "two speakers",
+  "leadIn": 1,
+  "tail": 2,
+  "speakers": [
+    { "tag": "ana", "voice": "Paulina" },
+    { "tag": "ben", "voice": "Samantha" }
+  ],
+  "lines": [
+    { "at": 0, "who": "ana", "text": "Buenos días a todos, gracias por venir. Hoy vamos a revisar el plan de lanzamiento de la aplicación y las fechas del piloto con los clientes." },
+    { "at": 1, "who": "ben", "text": "Yes, sounds good.", "expect": "aside" },
+    { "at": 10, "who": "ana", "text": "El piloto empieza el lunes con tres clientes en Madrid y dos en Ciudad de México." },
+    { "at": 17, "who": "ben", "text": "That works for me. I will prepare the onboarding checklist and send it to the team before Friday.", "expect": "change" },
+    { "at": 25, "who": "ana", "text": "Perfecto. Necesitamos también una revisión de seguridad antes de abrir el acceso a más usuarios." },
+    { "at": 29, "who": "ben", "text": "Agreed, the security review should cover the payment flow and the new login screen.", "expect": "overlap" },
+    { "at": 37, "who": "ana", "text": "Sí, exacto. Yo hablo con el equipo de pagos esta tarde y les pido una fecha." },
+    { "at": 44, "who": "ben", "text": "Great. Then we launch the pilot on Monday and review security next week." },
+    { "at": 51, "who": "ana", "text": "De acuerdo. Gracias a todos, nos vemos el lunes." },
+    { "at": 55, "who": "ben", "text": "Thanks everyone, see you on Monday." }
+  ]
+}
