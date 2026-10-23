@@ -7,6 +7,7 @@ import {
   RtkErrorSchema,
   RtkMeetingSchema,
   RtkParticipantSchema,
+  RtkRecordingDetailSchema,
   RtkRecordingSchema,
   RtkWebhookPublicKeySchema,
 } from "./core/schemas.ts";
@@ -127,6 +128,10 @@ export async function startTrackRecording(cfg: RtkConfig, meetingId: string): Pr
   if (!d.success) return { id: null, status: null, raw };
   const first = d.data.recordings?.[0];
   return { id: d.data.id ?? d.data.recording_id ?? first?.id ?? null, status: d.data.status ?? first?.status ?? null, raw };
+}
+
+export async function getRecording(cfg: RtkConfig, recordingId: string) {
+  return rtkCall(cfg, "GET", `/recordings/${encodeURIComponent(recordingId)}`, RtkRecordingDetailSchema);
 }
 
 export async function stopRecording(cfg: RtkConfig, recordingId: string) {

@@ -1,14 +1,16 @@
 // The paragraph rule (docs/V0.md): finals in, closed paragraphs out. Pure and
 // clock-free: every time is an argument, Scribe's own receipt clock in epoch ms.
 //
-// Speakers are compared by `userId`. A short final from someone else while a
-// paragraph is open is a *candidate* aside, held until the floor-holder's next
-// final shows whether they kept talking. `partial()` lets Scribe report that
-// the floor-holder is mid-utterance (partials arrive long before the final),
-// so neither the gap nor a candidate resolves early under a monologue.
+// Speakers are compared by `userId`. A short final from someone else while
+// another speaker holds the floor is a *candidate* aside, held until the
+// floor-holder's next final shows whether they kept talking. The floor is the
+// open paragraph's speaker, or, when nothing is open, whoever has live
+// partials (a provisional floor: the opening sentence's final arrives long
+// after a listener's "yes"). `partial()` is how Scribe reports partials, so
+// neither the gap nor a candidate resolves early under a long utterance.
 import { z } from "zod";
 import { paragraphId } from "./ids.ts";
-import { AsideSchema, StoredUtteranceSchema, type Aside, type Paragraph, type StoredUtterance } from "./schemas.ts";
+import { AsideSchema, StoredUtteranceSchema, type Paragraph, type StoredUtterance } from "./schemas.ts";
 
 export interface ParagraphOptions {
   gapMs: number;
@@ -36,6 +38,8 @@ const OpenSchema = z.object({
   pieces: z.array(z.string()),
   utterances: z.array(z.number().int().nonnegative()),
   asides: z.array(AsideSchema),
+  /** Seqs already inlined as asides: a candidate lands in the text once. */
+  asideSeqs: z.array(z.number().int().nonnegative()).default([]),
   /** Gap clock: the floor-holder's last t1, or a later backchannel's t1. */
   gapFrom: z.number().int(),
 });
@@ -45,8 +49,8 @@ export const ParagraphsStateSchema = z.object({
   v: z.literal(1),
   open: OpenSchema.nullable(),
   candidates: z.array(StoredUtteranceSchema),
-  /** Floor-holder heard since their last final: first and latest partial. */
-  floor: z.object({ since: z.number().int(), last: z.number().int() }).nullable(),
+  /** Who holds the floor by partials since their last final: first and latest partial. */
+  floor: z.object({ userId: z.string().default(""), since: z.number().int(), last: z.number().int() }).nullable(),
 });
 export type ParagraphsState = z.infer<typeof ParagraphsStateSchema>;
 
@@ -78,6 +82,7 @@ export function createParagraphs(opts: Partial<ParagraphOptions> = {}): Paragrap
 
   const lastCandidate = () => s.candidates[s.candidates.length - 1];
 
+  /** Open paragraph: the floor-holder must resume by then for the candidates to be asides. */
   const candidateDeadline = (): number | null => {
     const c = lastCandidate();
     return c ? c.t1 + o.continueWithinMs : null;
@@ -98,37 +103,49 @@ export function createParagraphs(opts: Partial<ParagraphOptions> = {}): Paragrap
     return cd === null ? due : Math.max(due, cd);
   };
 
-  const openWith = (u: StoredUtterance): void => {
-    s.open = {
-      id: paragraphId(u.t0),
-      t0: u.t0,
-      t1: u.t1,
-      speaker: u.speaker,
-      userId: u.userId,
-      pieces: [u.text.trim()],
-      utterances: [u.seq],
-      asides: [],
-      gapFrom: u.t1,
-    };
-    s.floor = null;
+  /** Nothing open, candidates held under a provisional floor: it must not go quiet for gapMs. */
+  const provisionalDeadline = (): number | null => {
+    const c = lastCandidate();
+    if (!c) return null;
+    return Math.max(c.t1, s.floor?.last ?? c.t1) + o.gapMs;
   };
 
-  const extend = (p: Open, u: StoredUtterance): void => {
+  const addAside = (p: Open, c: StoredUtterance): void => {
+    if (p.asideSeqs.includes(c.seq) || p.utterances.includes(c.seq)) return;
+    const text = c.text.trim();
+    p.asides.push({ speaker: c.speaker, text, t0: c.t0 });
+    p.asideSeqs.push(c.seq);
+    p.pieces.push(`[${c.speaker}: ${text}]`);
+    p.gapFrom = Math.max(p.gapFrom, c.t1);
+  };
+
+  /** Inline every held candidate, now resolved, and forget it. */
+  const commitAsides = (p: Open): void => {
+    for (const c of s.candidates) addAside(p, c);
+    s.candidates = [];
+  };
+
+  // The floor-holder's final: candidates said in the pause before it go first,
+  // ones that overlap it go after its text.
+  const take = (p: Open, u: StoredUtterance): void => {
+    const held = s.candidates;
+    s.candidates = [];
+    for (const c of held) if (c.t0 < u.t0) addAside(p, c);
     p.pieces.push(u.text.trim());
     p.utterances.push(u.seq);
     p.t1 = Math.max(p.t1, u.t1);
     p.gapFrom = Math.max(p.gapFrom, u.t1);
+    for (const c of held) if (c.t0 >= u.t0) addAside(p, c);
     s.floor = null;
   };
 
-  const commitAsides = (p: Open): void => {
-    for (const c of s.candidates) {
-      const a: Aside = { speaker: c.speaker, text: c.text.trim(), t0: c.t0 };
-      p.asides.push(a);
-      p.pieces.push(`[${a.speaker}: ${a.text}]`);
-      p.gapFrom = Math.max(p.gapFrom, c.t1);
-    }
-    s.candidates = [];
+  const openWith = (u: StoredUtterance): void => {
+    const p: Open = {
+      id: paragraphId(u.t0), t0: u.t0, t1: u.t1, speaker: u.speaker, userId: u.userId,
+      pieces: [], utterances: [], asides: [], asideSeqs: [], gapFrom: u.t1,
+    };
+    s.open = p;
+    take(p, u);
   };
 
   const close = (out: Paragraph[]): void => {
@@ -148,22 +165,33 @@ export function createParagraphs(opts: Partial<ParagraphOptions> = {}): Paragrap
     s.floor = null;
   };
 
-  /** Nobody continued: close the paragraph and replay the candidates as speech. */
+  /** Nobody continued: close the paragraph (if any) and replay the candidates as speech. */
   const rejectCandidates = (out: Paragraph[]): void => {
     const held = s.candidates;
     s.candidates = [];
     close(out);
+    s.floor = null;
     for (const c of held) apply(c, out);
   };
+
+  /** A provisional floor: someone else has partials newer than gapMs before this final. */
+  const heldByOther = (u: StoredUtterance): boolean =>
+    s.floor !== null && s.floor.userId !== u.userId && u.t1 - s.floor.last <= o.gapMs;
 
   // The rule itself, with timing already settled by `flushInto`.
   const apply = (u: StoredUtterance, out: Paragraph[]): void => {
     const p = s.open;
-    if (!p) return openWith(u);
-    if (u.userId === p.userId) {
-      commitAsides(p);
-      return extend(p, u);
+    if (!p) {
+      if (s.candidates.length) {
+        if (s.floor !== null && u.userId === s.floor.userId) return openWith(u);
+        if (isShort(u)) return void s.candidates.push(u);
+        rejectCandidates(out);
+        return apply(u, out);
+      }
+      if (isShort(u) && heldByOther(u)) return void s.candidates.push(u);
+      return openWith(u);
     }
+    if (u.userId === p.userId) return take(p, u);
     if (isShort(u)) {
       s.candidates.push(u);
       p.gapFrom = Math.max(p.gapFrom, u.t1);
@@ -180,7 +208,12 @@ export function createParagraphs(opts: Partial<ParagraphOptions> = {}): Paragrap
   const flushInto = (now: number, out: Paragraph[]): void => {
     for (;;) {
       const p = s.open;
-      if (!p) return;
+      if (!p) {
+        const pd = provisionalDeadline();
+        if (pd === null || now < pd) return;
+        rejectCandidates(out);
+        continue;
+      }
       const cd = candidateDeadline();
       if (cd !== null && now >= cd && !floorAnswered()) {
         rejectCandidates(out);
@@ -196,10 +229,18 @@ export function createParagraphs(opts: Partial<ParagraphOptions> = {}): Paragrap
   };
 
   const hear = (userId: string, from: number, to: number): void => {
-    if (!s.open || s.open.userId !== userId) return;
-    s.floor = s.floor
-      ? { since: Math.min(s.floor.since, from), last: Math.max(s.floor.last, to) }
-      : { since: from, last: to };
+    const f = s.floor;
+    if (f && f.userId === userId) {
+      s.floor = { userId, since: Math.min(f.since, from), last: Math.max(f.last, to) };
+      return;
+    }
+    if (s.open) {
+      if (s.open.userId === userId) s.floor = { userId, since: from, last: to };
+      return;
+    }
+    // Provisional floor: the first live speaker; another takes it only once
+    // the holder has gone quiet and no candidate waits on them.
+    if (!f || (!s.candidates.length && from - f.last > o.gapMs)) s.floor = { userId, since: from, last: to };
   };
 
   return {
@@ -207,7 +248,7 @@ export function createParagraphs(opts: Partial<ParagraphOptions> = {}): Paragrap
       if (!u.text.trim()) return [];
       const out: Paragraph[] = [];
       // The final is proof its speaker was talking from t0 to t1.
-      hear(u.userId, u.t0, u.t1);
+      if (s.open?.userId === u.userId || s.floor?.userId === u.userId) hear(u.userId, u.t0, u.t1);
       flushInto(u.t1, out);
       apply(u, out);
       return out;
@@ -221,7 +262,7 @@ export function createParagraphs(opts: Partial<ParagraphOptions> = {}): Paragrap
       return out;
     },
     nextDeadline() {
-      if (!s.open) return null;
+      if (!s.open) return provisionalDeadline();
       const due = closeDeadline(s.open);
       const cd = candidateDeadline();
       return cd !== null && !floorAnswered() ? Math.min(cd, due) : due;

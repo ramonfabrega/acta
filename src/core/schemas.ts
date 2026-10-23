@@ -193,16 +193,39 @@ const HookMeeting = z.object({
   endedAt: z.string().nullable().optional(),
 }).loose();
 
-const TrackDownloadUrls = z.array(z.object({
+/** One per-participant file of a track recording (seen live 2026-10-23). */
+export const TrackFileSchema = z.object({
+  download_url: z.string(),
+  peer_id: z.string().optional(),
+  custom_participant_id: z.string().nullable().optional(),
+}).loose();
+export const TrackLinkSchema = z.object({
   layer_name: z.string().optional(),
-  download_urls: z.record(z.string(), z.object({ download_url: z.string() }).loose()).optional(),
-}).loose());
+  download_urls: z.record(z.string(), TrackFileSchema).optional(),
+}).loose();
+/** The REST record wraps the layers in `{links}`; the docs sketch a bare array. Accept both. */
+export const TrackDownloadUrlSchema = z.union([
+  z.object({ links: z.array(TrackLinkSchema) }).loose(),
+  z.array(TrackLinkSchema),
+]);
+export type TrackLink = z.infer<typeof TrackLinkSchema>;
+
+/** `GET /recordings/{id}`: the authoritative place for a track recording's files. */
+export const RtkRecordingDetailSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  download_url: z.union([z.string(), TrackDownloadUrlSchema]).nullable().optional(),
+  audio_download_url: z.string().nullable().optional(),
+  download_url_expiry: z.string().nullable().optional(),
+  recording_duration: z.number().nullable().optional(),
+}).loose();
 
 export const HookRecordingSchema = z.object({
   id: z.string().optional(),
   recordingId: z.string().optional(),
   status: z.string(),
-  downloadUrl: z.union([z.string(), TrackDownloadUrls]).nullable().optional(),
+  downloadUrl: z.union([z.string(), TrackDownloadUrlSchema]).nullable().optional(),
+  download_url: z.union([z.string(), TrackDownloadUrlSchema]).nullable().optional(),
   audioDownloadUrl: z.string().nullable().optional(),
   downloadUrlExpiry: z.string().nullable().optional(),
   outputFileName: z.string().nullable().optional(),

@@ -40,8 +40,9 @@ import {
   type RoomFrame,
   type StoredUtterance,
   type Utterance,
+  TrackDownloadUrlSchema,
 } from "./core/schemas.ts";
-import { RTK_AGENT_WS_URL, addParticipant, rtkConfig, startTrackRecording, stopRecording, RtkError } from "./rtk.ts";
+import { RTK_AGENT_WS_URL, addParticipant, getRecording, rtkConfig, startTrackRecording, stopRecording, RtkError } from "./rtk.ts";
 
 const PING_EVERY_MS = 20_000;
 const PING_TIMEOUT_MS = 10_000;
@@ -92,7 +93,7 @@ const NextAtRow = z.object({ next_at: z.number().nullable() });
 type Peer = { userId: string; speaker: string };
 
 /** One recording file to copy: published path under recordings/ and its vendor URL. */
-type RecordingFile = { file: string; url: string; kind: string };
+type RecordingFile = { file: string; url: string; kind: string; userId?: string; peerId?: string };
 
 export class Scribe extends DurableObject<Record<string, unknown>> {
   private readonly cfg: Env;
@@ -338,9 +339,19 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
         }
         if (id && id === this.meta("recordingId")) this.setMeta("recordingStatus", r.status);
         if (r.status === "UPLOADED") {
-          const files = recordingFiles(r);
+          let files = recordingFiles(r);
+          // The webhook may carry no URLs; the recording record always does.
+          if (files.length === 0 && id) {
+            try {
+              const detail = await getRecording(rtkConfig(this.cfg), id);
+              files = recordingFiles({ status: detail.status, download_url: detail.download_url, audioDownloadUrl: detail.audio_download_url });
+              this.log("hook.recording_detail", { recordingId: id, files: files.length });
+            } catch (e) {
+              this.log("hook.recording_detail_failed", { recordingId: id, error: e instanceof RtkError ? `${e.status} ${e.vendorMessage}` : String(e) });
+            }
+          }
           if (files.length === 0) this.log("hook.recording_no_urls", { recordingId: id });
-          for (const f of files) this.queueCopy(`recordings/${f.file}`, f.kind, f.url, now);
+          for (const f of files) this.queueCopy(`recordings/${this.trackFileName(f)}`, f.kind, f.url, now);
           await this.arm();
         } else if (r.status === "ERRORED") {
           this.sql.exec(
@@ -895,6 +906,15 @@ export class Scribe extends DurableObject<Record<string, unknown>> {
 
   // --- R2 copies of vendor files ------------------------------------------------------------
 
+  /** `<speaker>-<peer8>.webm` for a track we can attribute; the vendor name otherwise. */
+  private trackFileName(f: RecordingFile): string {
+    if (!f.userId || !f.peerId) return f.file;
+    const row = this.sql.exec(`SELECT speaker FROM participants WHERE user_id = ? ORDER BY joined_at LIMIT 1`, f.userId).toArray()[0];
+    const speaker = z.object({ speaker: z.string() }).safeParse(row);
+    const who = speaker.success ? speaker.data.speaker : f.userId;
+    return safeName(`${who}-${f.peerId.slice(0, 8)}.webm`);
+  }
+
   private queueCopy(rel: string, kind: string, url: string, now: number): void {
     const key = `${this.prefix()}${rel}`;
     this.sql.exec(
@@ -1047,27 +1067,42 @@ function basename(url: string): string | null {
   }
 }
 
-/** Both shapes: composite (`downloadUrl` / `audioDownloadUrl` strings) and track (layers of files). */
-export function recordingFiles(r: z.infer<typeof HookRecordingSchema>): RecordingFile[] {
+/** The agent's own track is silence; never copy it. */
+const AGENT_CUSTOM_ID = "acta-agent";
+
+/**
+ * Both shapes: composite (`downloadUrl` / `audioDownloadUrl` strings) and
+ * track (`{links: [...]}` or a bare array of layers, each a map of file →
+ * `{download_url, peer_id, custom_participant_id}`), from the webhook
+ * (camelCase) or the REST record (snake_case).
+ */
+export function recordingFiles(r: Pick<z.infer<typeof HookRecordingSchema>, "id" | "recordingId" | "status" | "downloadUrl" | "download_url" | "audioDownloadUrl" | "outputFileName">): RecordingFile[] {
   const out: RecordingFile[] = [];
   const seen = new Set<string>();
   const id = r.id ?? r.recordingId ?? "recording";
-  const add = (file: string, url: string, kind: string, layer?: string) => {
-    let name = safeName(file);
+  const add = (f: RecordingFile, layer?: string) => {
+    let name = safeName(f.file);
     if (seen.has(name) && layer) name = `${safeName(layer)}_${name}`;
     if (seen.has(name)) name = `${out.length}_${name}`;
     seen.add(name);
-    out.push({ file: name, url, kind });
+    out.push({ ...f, file: name });
   };
-  if (typeof r.downloadUrl === "string" && r.downloadUrl) {
-    add(r.outputFileName || basename(r.downloadUrl) || `${id}.mp4`, r.downloadUrl, "recording");
-  } else if (Array.isArray(r.downloadUrl)) {
-    for (const layer of r.downloadUrl) {
+  const dl = r.downloadUrl ?? r.download_url ?? null;
+  if (typeof dl === "string" && dl) {
+    add({ file: r.outputFileName || basename(dl) || `${id}.mp4`, url: dl, kind: "recording" });
+  } else if (dl) {
+    const parsed = TrackDownloadUrlSchema.safeParse(dl);
+    const layers = parsed.success ? (Array.isArray(parsed.data) ? parsed.data : parsed.data.links) : [];
+    for (const layer of layers) {
       for (const [file, v] of Object.entries(layer.download_urls ?? {})) {
-        add(file, v.download_url, "track", layer.layer_name);
+        if (v.custom_participant_id === AGENT_CUSTOM_ID) continue;
+        const f: RecordingFile = { file, url: v.download_url, kind: "track" };
+        if (v.custom_participant_id) f.userId = v.custom_participant_id;
+        if (v.peer_id) f.peerId = v.peer_id;
+        add(f, layer.layer_name);
       }
     }
   }
-  if (r.audioDownloadUrl) add(basename(r.audioDownloadUrl) || `${id}.audio`, r.audioDownloadUrl, "audio");
+  if (r.audioDownloadUrl) add({ file: basename(r.audioDownloadUrl) || `${id}.audio`, url: r.audioDownloadUrl, kind: "audio" });
   return out;
 }
