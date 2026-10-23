@@ -1,0 +1,18 @@
+{
+  "description": "After `acta new` runs in Bash, hand the meeting to this session as its brain: build the events socket URL (token via passage at run time) and tell the session to arm Monitor on it. A hook cannot call Monitor itself; re-arming every 30 minutes is the session's job (docs/BRAIN.md).",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.bun/bin/bun \"${CLAUDE_PLUGIN_ROOT}\"/hooks/acta-new.ts",
+            "timeout": 15,
+            "statusMessage": "acta: handing the meeting to its brain…"
+          }
+        ]
+      }
+    ]
+  }
+}

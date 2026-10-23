@@ -1,0 +1,7 @@
+{
+  "name": "acta",
+  "version": "0.1.0",
+  "description": "Own the meeting from a Claude Code session: the acta CLI as a skill (mint a RealtimeKit room, follow its events, write the live book, export, sync recordings to ~/.acta, doctor) and the hook that hands a freshly minted meeting to the session as its brain.",
+  "author": { "name": "Ramon Fabrega" },
+  "keywords": ["meeting", "transcript", "realtimekit", "cloudflare", "cli"]
+}
