@@ -7,8 +7,11 @@ vendor deletes them. Seeded 2026-10-23 after three days of design scouting.
 Decision narrative and rejected alternatives: `docs/DESIGN.md`.
 First-evening checklist: `docs/SPIKE.md`.
 
-Start a session with `acta --llms` once the CLI exists; until then this file
-and the two docs are the whole truth.
+Start a session with `bun cli/acta.ts --llms` (`acta --llms` after
+`bun link`). This file is the map; `docs/V0.md` is the contract everything
+is built to (routes, shapes, the paragraph machine, vendor facts measured
+live); `docs/SPIKE.md` is the log of the first evening; `docs/DESIGN.md` the
+decisions and what they beat. v0 is deployed; see README for the loop.
 
 ## Thesis
 
@@ -52,12 +55,15 @@ reads text, never audio, and runs where the operator's subscription runs.
   unavailable.
   Metered models (AI Gateway) only where a session is too slow: live
   caption translation, utterance tagging. Neither is v1.
-- **CLI** (`cli/`, incur): `acta new` (mints the meeting and prints the
-  link to share by hand), `acta meetings`, `acta tail <id>`, `acta book put`,
+- **CLI** (`cli/`): `acta new` (mints the meeting and prints the link to
+  share by hand), `acta meetings`, `acta tail <id>`, `acta book put|show`,
   `acta export <id>` (Markdown; other targets later), `acta sync` (R2 →
-  `~/.acta/meetings/<id>/`), `acta doctor`. Agent-first; `--llms` is
-  generated from the command definitions. The session that runs `acta new`
-  is the meeting's brain: it already holds the id when it arms Monitor.
+  `~/.acta/meetings/<id>/`), `acta doctor`, `acta test` (synthetic
+  speakers, end to end). Agent-first; `--llms` is generated from the
+  command table. v0 ships a hand-rolled parser; the intended base is
+  **incur**, which also generates per-verb skills (`acta skills add`), and
+  porting to it precedes the plugin. The session that runs `acta new` is
+  the meeting's brain: it already holds the id when it arms Monitor.
 - **lore**: a source adapter on lore's side reads `~/.acta/meetings`; one
   meeting indexes as one session-shaped unit, speaker as an authorship
   field. lore also supplies the day-one `keywords` from the entity names it
@@ -74,7 +80,8 @@ reads text, never audio, and runs where the operator's subscription runs.
 - **The agent joins before anyone speaks** and leaves when the last human
   does. It bills as a participant and keeps the session alive otherwise.
 - **Deploys wait for the meeting to end.** The agent socket's resume grace
-  is 5 seconds; a redeploy mid-meeting loses words.
+  is 5 seconds; a redeploy mid-meeting loses words. Workers Builds deploys
+  every merge to `main`, so merging is deploying: `acta meetings` first.
 - **Vendor copies expire in seven days.** Recordings and transcripts are
   ours only once they sit in the R2 bucket. The webhook handler is the
   copy, not a cron.
@@ -86,8 +93,10 @@ near 120 s so a monologue still flows. A final from another speaker of three
 words or fewer and under about 2 s, while the floor-holder continues within
 1.5 s, is a **backchannel**: it stays in the JSONL as its own utterance and
 appears inline in the paragraph text as a bracketed aside, and it does not
-close the turn. Events are sparse by design: twenty to forty per hour. The
-harness suppresses a firehose.
+close the turn. Partials never leave Scribe but they do feed the rule: the
+floor-holder's partials keep the turn open, and live partials give a speaker
+a provisional floor before their first final. Events are sparse by design:
+twenty to forty per hour. The harness suppresses a firehose.
 
 ## Data shape
 
@@ -95,12 +104,14 @@ One line per utterance, the contract between Scribe, the CLI, batch passes
 and lore:
 
 ```json
-{"t0":1761250000123,"t1":1761250003800,"speaker":"ana","userId":"u_…","text":"…","lang":"es","final":true,"engine":"nova-3","conf":null}
+{"t0":1761250000123,"t1":1761250003800,"speaker":"ana","userId":"u_…","peerId":"…","text":"…","lang":null,"final":true,"engine":"nova-3","conf":0.99}
 ```
 
-`engine` is a row property: a Whisper or Parakeet pass over the stored
-tracks adds rows for the same instants, which is how models are compared on
-a real meeting.
+`t0`/`t1` are epoch ms from Scribe's own clock (receipt of the first partial
+and of the final); the vendor's timestamps are second-granular. `lang` is
+`null` from nova-3 `multi`. `engine` is a row property: a Whisper or
+Parakeet pass over the stored tracks adds rows for the same instants, which
+is how models are compared on a real meeting.
 
 ## Conventions
 

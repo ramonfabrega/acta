@@ -33,19 +33,24 @@ created by API; 26 agent frames for 5 finals in 18 s of speech.
       RTK_API_TOKEN` from there.
 - [x] Presets: `human` with `permissions.transcription_enabled: true`;
       `agent` with `permissions.hidden_participant: true` and no media.
-- [ ] Webhook pointing at `https://<hostname>/hooks/rtk` (`bun run setup`
-      registers it). No secret: RealtimeKit signs with RSA-SHA256 and
-      publishes the key at `api.realtime.cloudflare.com/.well-known/webhooks.json`.
+- [x] Webhook `https://acta.ramonfabrega.com/hooks/rtk` registered by
+      `bun run setup` (2026-10-23). No secret: RealtimeKit signs with
+      RSA-SHA256 and publishes the key at
+      `api.realtime.cloudflare.com/.well-known/webhooks.json`.
 - [x] R2 bucket `acta-meetings` (created 2026-10-23).
-- [ ] `ACTA_TOKEN` (`openssl rand -hex 32`, kept in passage at
-      `tokens/cloudflare/personal/acta/acta-token`) as a secret, and in the
-      brain's environment for the CLI.
+- [x] `ACTA_TOKEN` (`openssl rand -hex 32`, kept in passage at
+      `tokens/cloudflare/personal/acta/acta-token`) set as a Worker secret
+      by `scripts/secrets.sh`; the CLI reads it from passage.
 - [ ] Cloudflare Access application on the hostname, your identity provider,
       a policy allowlisting the participants' emails. Put the team domain
       and AUD in vars; the Worker verifies the JWT and uses the email as
-      identity.
-- [ ] Workers Builds connected to the GitHub repo; push to `main` deploys.
+      identity. Until then the room link is the capability.
+- [x] Workers Builds connected (2026-10-23): merge to `main` deploys, docs
+      and CLI paths excluded from the watch.
 - [ ] `bun run tail` in a terminal for the whole evening.
+
+The three checks and v0 itself were done the same night with synthetic
+speakers; the first evening with humans is still to come.
 
 ## A meeting, end to end
 

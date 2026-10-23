@@ -98,7 +98,12 @@ Markdown file.
 **D10 — Backchannels do not close a turn (10-23).** A final of three words
 or fewer, under about 2 s, from a non-floor-holder who does not take the
 floor within 1.5 s, is an aside kept inline. Paragraphs close on real speaker
-change, a 4 s gap, or a 120 s cap.
+change, a 4 s gap, or a 120 s cap. *Refined the same night from live runs:*
+the floor-holder's partials keep the turn open (finals arrive only at the
+end of a sentence, so a gap timer on finals alone splits monologues), and a
+speaker whose partials are live holds a provisional floor before their first
+final, so an "mhm" during the opening sentence is an aside too. The exact
+machine is `docs/V0.md`.
 
 **D11 — Two-channel Mac capture stays as the second front end (10-22).**
 ScreenCaptureKit system audio plus AVAudioEngine mic, two mono tracks on one
@@ -119,6 +124,33 @@ obscurity.
 Considered: `opus` (the codec; clashes with Claude Opus), `silk` (Opus's
 parent codec), `hansard`, `vorbis`.
 
+**D15 — No vendor post-meeting transcript (10-23, from the spike).** The
+Create-meeting API validates the one `language` field against Whisper's list
+whenever `transcribe_on_end` is on, and rejects `multi`. Live code-switching
+matters more than a free Whisper pass we would redo anyway (D2: rebuild
+beats migrate), so meetings are created with `multi` and
+`transcribe_on_end: false`; our own batch pass over the stored tracks is
+the post-meeting transcript and the brain writes the summary.
+*Rejected:* `es` live (loses the English half of a sentence) and the
+vendor's `summarize_on_end`.
+
+**D16 — A capability link is the v0 gate; Access is verified on top
+(10-23).** Creating the Access application needs a dashboard step the
+operator does by hand, and a single-user v0 must not wait on it. `acta new`
+prints `/m/<id>?k=<invite>`; the Worker checks `k` before any Durable Object
+wakes, and when `CF_ACCESS_*` are set it also verifies the Access JWT and
+uses its email as identity. *Rejected:* an open page that mints a token for
+anyone (the token is the room).
+
+**D17 — Synthetic speakers are the test harness (10-23).** The agent
+driving acta cannot produce a human's audio, so `acta test` runs headless
+Chromium participants whose microphone is a WAV (`say` + ffmpeg, one voice
+per speaker, scripted offsets so overlaps and backchannels happen on cue)
+and whose camera is a canvas waveform. A scripted two-speaker meeting runs
+end to end in two minutes with nobody present; humans come in for the real
+UX. *Rejected:* mocking RealtimeKit (the shapes were wrong three times in
+one night and only the live API said so).
+
 ## Facts checked (dates are check dates)
 
 - Workers AI nova-3: $0.0052 per audio minute batch, $0.0092 over WebSocket
@@ -131,17 +163,28 @@ parent codec), `hansard`, `vorbis`.
   not by direct delivery (10-23).
 - RealtimeKit transcription: `ai_config.transcription.language` with
   `multi` and `keywords`; interim results flagged `isPartialTranscript`;
-  client payload has `timestamp` in epoch ms; post-meeting Whisper outputs
-  CSV/JSON/SRT/VTT via `meeting.transcript` webhook; real-time bills 836.36
-  neurons per audio minute. The Create-meeting API reference lists only
-  `en-US, en-IN, de, hi, sv, ru, pl, el, fr, nl` (10-23) — the discrepancy
-  with the transcription page is open item 1.
+  post-meeting Whisper outputs CSV/JSON/SRT/VTT via `meeting.transcript`
+  webhook; real-time bills 836.36 neurons per audio minute. The
+  Create-meeting API reference lists only `en-US, en-IN, de, hi, sv, ru, pl,
+  el, fr, nl` (10-23). *Corrected live the same day:* `multi` and `es` are
+  accepted, but `multi` only with `transcribe_on_end: false` (D15); the
+  client payload's time field is `date`, ISO to the second, not epoch ms,
+  and it carries a stable per-utterance `id`; the agent feed's
+  `started_at`/`ended_at` are second-granular server clocks with no segment
+  id. Timing comes from Scribe's own receipt clock (`docs/SPIKE.md`).
 - Agent Participant: `wss://api.realtime.cloudflare.com/agent-ws/v1`,
   `Authorization: Bearer <participant token>`,
   `Sec-WebSocket-Protocol: realtimekit.v1`, subscriptions
-  `transcript,participant,broadcast`, ping every 20 s, 5 s resume grace,
-  10,000 unsent events buffer, receive-only today, token valid 100 days
-  (10-23).
+  `transcript,participant,broadcast`, `connection.ping` every 20 s with a
+  10 s answer deadline, 5 s resume grace, 10,000 unsent events buffer,
+  receive-only today, token valid 100 days (10-23). A `participant.join` is
+  signaling, not media: Firefox registers a join and never connects.
+- RealtimeKit webhooks are signed with RSA-SHA256 against a published public
+  key (`/.well-known/webhooks.json`); there is no shared secret. The
+  track-recording start answers 200 without an id; the id and the
+  per-participant files (`download_url.links[]`, the agent's own silent
+  track included) come from the `recording.statusUpdate` webhook and
+  `GET /recordings/{id}` (10-23, live; shapes in `docs/V0.md`).
 - Realtime SFU: egress $0.05/GB after 1,000 GB/month free, shared with TURN
   (10-23). WebSocket media adapter GA 2026-09-30; 1 to 4 tracks per create;
   15 s reconnect window; PCM is 48 kHz stereo s16le.
