@@ -81,6 +81,33 @@ Print the book as Markdown: every section, or one with --section.
 |------|------|---------|-------------|
 | `--section` | `string` |  | One of summary, decisions, actions, notes, transcript |
 
+## acta compare
+
+### acta compare
+
+Compare a synced meeting's transcripts: the live rows (utterances.jsonl, nova-3) against each batch pass in transcripts/ (whisper, parakeet). Per engine and per speaker: rows, words, speech seconds; per engine, wall time, cost and peak memory from the run file; per pair of engines, token agreement on rows of the same peer that overlap in time; and the review list, lowest agreement then lowest confidence first (the review page's sampling order). Reads ~/.acta only.
+
+#### Arguments
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `id` | `string` | yes | Meeting id (synced with `acta sync <id>`) |
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `number` | `20` | Rows in the review list |
+
+#### Examples
+
+```sh
+# A longer review list
+acta compare <id> --limit 50
+```
+
+> Agreement is the recall of a row's normalized tokens in the text of the other engine's rows of the same peer whose [t0, t1] meet within 2 s; not WER (no reference yet). Missing batch passes are skipped; a missing utterances.jsonl is exit 1 (run `acta sync <id>` and `acta transcribe <id> --engine …`). ACTA_HOME overrides ~/.acta.
+
 ## acta copy
 
 ### acta copy
@@ -217,3 +244,38 @@ End-to-end check with synthetic speakers: fresh meeting, WAV voices through head
 | `--timeout` | `number` | `180` | Give up waiting for `ended` this many seconds after launch (then POST /end) |
 
 > Needs macOS `say`, ffmpeg/ffprobe and a Playwright Chromium (or ACTA_CHROME). Required checks: every speaker ≥1 final; attribution (text ↔ speaker); the backchannel is an aside; t1 order; utterances.jsonl in R2; `ended` without forcing. Extra checks (speaker change, overlap, lines heard) warn only. The run log is on stderr; the report is the answer.
+
+## acta transcribe
+
+### acta transcribe
+
+The batch pass over a synced meeting's per-speaker tracks: a second transcript with word timings, in the live row shape with `engine` set, to transcripts/<engine>.jsonl under ~/.acta/meetings/<id>/ and in R2. whisper runs on Workers AI through the Worker (the track is already in R2; metered, about $0.0005 per audio minute); parakeet runs locally through parakeet-mlx (free; `uv tool install parakeet-mlx`, ffmpeg).
+
+#### Arguments
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `id` | `string` | yes | Meeting id, already synced (`acta sync <id>`) |
+
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--engine` | `string` |  | whisper (Workers AI, remote) or parakeet (local, MLX) |
+| `--language` | `string` |  | whisper: force the language (`es`); omitted, Whisper detects it per track |
+| `--noPrompt` | `boolean` |  | whisper: leave the meeting's keywords out of the prompt |
+| `--concurrency` | `number` | `3` | whisper: tracks in flight at once |
+| `--local` | `boolean` |  | Write the files locally only, no copy to R2 |
+| `--track` | `string` |  | Only this track (file name under recordings/, repeatable as a comma list) |
+
+#### Examples
+
+```sh
+# Whisper, Spanish, keywords as the prompt
+acta transcribe <id> --engine whisper --language es
+
+# Parakeet on this machine
+acta transcribe <id> --engine parakeet
+```
+
+> One row per track as it lands, then the summary (rows, wall time, USD, peak memory for a local engine). Whisper runs with VAD on: a per-speaker track is mostly silence, and Whisper hallucinates on silence without it. Exit 1 when a track failed; the others still land. Then `acta compare <id>`.

@@ -13,8 +13,8 @@ is built to (routes, shapes, the paragraph machine, vendor facts measured
 live); `docs/SPIKE.md` is the log of the first evening; `docs/MEETING1.md`
 the log of the first live meeting (what broke, with mechanisms); `docs/DESIGN.md` the
 decisions and what they beat; `docs/BRAIN.md` the runbook for the session
-that runs a meeting; `docs/BATCH.md` the plan for the batch pass (Whisper
-on Workers AI, Parakeet locally) and the cost table it completes. v0 is
+that runs a meeting; `docs/BATCH.md` the batch pass (Whisper on Workers AI,
+Parakeet locally), what it measured on meeting 1 and the cost table. v0 is
 deployed; see README for the loop.
 
 ## Thesis
@@ -67,7 +67,10 @@ reads text, never audio, and runs where the operator's subscription runs.
   `acta tail <id>`, `acta book put|show`, `acta export <id>` (Markdown;
   other targets later), `acta copy <id>` (vendor → R2 now, the recovery
   for what `doctor` lists), `acta sync` (R2 → `~/.acta/meetings/<id>/`),
-  `acta doctor`, `acta test` (synthetic speakers, end to end). The command
+  `acta doctor`, `acta transcribe <id> --engine whisper|parakeet` (the
+  batch pass over the synced tracks: word-timed rows beside the live ones,
+  locally and in R2), `acta compare <id>` (live against batch, the review
+  order), `acta test` (synthetic speakers, end to end). The command
   table is `cli/cli.ts` (zod schemas; bodies in `cli/commands/`), so
   `--help`, `--llms`, `--llms-full`, `--mcp` and `acta skills add` (one
   skill per verb) are generated from it. Every answer is data; `doctor`,

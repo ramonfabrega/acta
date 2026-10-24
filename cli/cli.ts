@@ -20,6 +20,8 @@ import { createMeeting } from "./commands/new.ts";
 import { syncMeetings } from "./commands/sync.ts";
 import { follow, frameLine } from "./commands/tail.ts";
 import { AUDIO_MODES, BOT_MODES, runTest } from "./commands/test.ts";
+import { transcribeMeeting } from "./commands/transcribe.ts";
+import { EngineSchema } from "../src/core/batch.ts";
 
 export const DESCRIPTION =
   "Own the meeting: a RealtimeKit room with per-speaker transcripts, a Durable Object (Scribe) that turns them into a live book, and recordings copied into R2. " +
@@ -151,6 +153,46 @@ cli.command("copy", {
   },
 });
 
+cli.command("transcribe", {
+  description:
+    "The batch pass over a synced meeting's per-speaker tracks: a second transcript with word timings, in the live row shape with `engine` set, to transcripts/<engine>.jsonl under ~/.acta/meetings/<id>/ and in R2. " +
+    "whisper runs on Workers AI through the Worker (the track is already in R2; metered, about $0.0005 per audio minute); parakeet runs locally through parakeet-mlx (free; `uv tool install parakeet-mlx`, ffmpeg).",
+  args: z.object({ id: z.string().describe("Meeting id, already synced (`acta sync <id>`)") }),
+  options: z.object({
+    engine: EngineSchema.describe("whisper (Workers AI, remote) or parakeet (local, MLX)"),
+    language: z.string().optional().describe("whisper: force the language (`es`); omitted, Whisper detects it per track"),
+    noPrompt: z.boolean().optional().describe("whisper: leave the meeting's keywords out of the prompt"),
+    concurrency: z.coerce.number().int().min(1).max(6).default(3).describe("whisper: tracks in flight at once"),
+    local: z.boolean().optional().describe("Write the files locally only, no copy to R2"),
+    track: z.string().optional().describe("Only this track (file name under recordings/, repeatable as a comma list)"),
+  }),
+  examples: [
+    { args: { id: "<id>" }, options: { engine: "whisper", language: "es" }, description: "Whisper, Spanish, keywords as the prompt" },
+    { args: { id: "<id>" }, options: { engine: "parakeet" }, description: "Parakeet on this machine" },
+  ],
+  hint: "One row per track as it lands, then the summary (rows, wall time, USD, peak memory for a local engine). Whisper runs with VAD on: a per-speaker track is mostly silence, and Whisper hallucinates on silence without it. Exit 1 when a track failed; the others still land. Then `acta compare <id>`.",
+  async *run(c) {
+    const it = transcribeMeeting(c.args.id, {
+      engine: c.options.engine,
+      language: c.options.language,
+      noPrompt: c.options.noPrompt,
+      concurrency: c.options.concurrency,
+      local: c.options.local,
+      tracks: c.options.track ? c.options.track.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+    });
+    for (;;) {
+      const n = await it.next();
+      if (n.done) {
+        const s = n.value;
+        yield s;
+        if (s.failed.length) return c.error({ code: "TRACKS_FAILED", message: `${s.failed.length} track(s) failed: ${s.failed.join(", ")}`, retryable: true });
+        return c.ok(undefined, { cta: { description: `${s.rows} rows from ${s.tracks} track(s) in ${s.dir}.`, commands: [`compare ${c.args.id}`] } });
+      }
+      yield n.value;
+    }
+  },
+});
+
 cli.command("doctor", {
   description: "Check the Worker, then list meetings ended without their recordings in R2 or live for more than 3 h. Exit 1 when anything is listed. `acta copy <id>` fetches a listed recording.",
   async *run(c) {
@@ -193,6 +235,20 @@ cli.command("test", {
       yield n.value;
     }
   },
+});
+
+cli.command("compare", {
+  description:
+    "Compare a synced meeting's transcripts: the live rows (utterances.jsonl, nova-3) against each batch pass in transcripts/ (whisper, parakeet). " +
+    "Per engine and per speaker: rows, words, speech seconds; per engine, wall time, cost and peak memory from the run file; per pair of engines, token agreement on rows of the same peer that overlap in time; " +
+    "and the review list, lowest agreement then lowest confidence first (the review page's sampling order). Reads ~/.acta only.",
+  args: z.object({ id: z.string().describe("Meeting id (synced with `acta sync <id>`)") }),
+  options: z.object({
+    limit: z.coerce.number().int().min(0).default(20).describe("Rows in the review list"),
+  }),
+  examples: [{ args: { id: "<id>" }, options: { limit: 50 }, description: "A longer review list" }],
+  hint: "Agreement is the recall of a row's normalized tokens in the text of the other engine's rows of the same peer whose [t0, t1] meet within 2 s; not WER (no reference yet). Missing batch passes are skipped; a missing utterances.jsonl is exit 1 (run `acta sync <id>` and `acta transcribe <id> --engine …`). ACTA_HOME overrides ~/.acta.",
+  run: async (c) => (await import("./commands/compare.ts")).compareMeeting(c.args.id, c.options.limit),
 });
 
 export default cli;
