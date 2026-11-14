@@ -17,6 +17,7 @@ import {
   type Env,
 } from "./core/schemas.ts";
 import { verifyRtkSignature } from "./core/webhook.ts";
+import { TranscribeBodySchema, WHISPER_MODEL, WhisperOutputSchema, type TranscribeAnswer } from "./core/whisper.ts";
 import { renderRoom } from "./room.ts";
 import { addParticipant, createMeeting, getWebhookPublicKey, listMeetings, rtkConfig, RtkError } from "./rtk.ts";
 import { AGENT_USER_ID, Scribe } from "./scribe.ts";
@@ -214,6 +215,29 @@ app.get("/api/meetings/:id/files/*", async (c) => {
   return new Response(obj.body, { headers });
 });
 
+const TranscriptNameSchema = z.string().min(1).max(120).regex(/^[A-Za-z0-9._-]+$/);
+const TRANSCRIPT_MAX_BYTES = 32 * 1024 * 1024;
+
+/**
+ * A batch transcript lands next to the live record (docs/BATCH.md): only
+ * `transcripts/` is writable, so the raw sources and the live rows stay
+ * what Scribe wrote.
+ */
+app.put("/api/meetings/:id/files/transcripts/:name", async (c) => {
+  const id = meetingId(c);
+  if (!id) return c.json({ error: "bad meeting id" }, 400);
+  const name = TranscriptNameSchema.safeParse(c.req.param("name"));
+  if (!name.success) return c.json({ error: "bad file name" }, 400);
+  const declared = Number(c.req.header("Content-Length") ?? "0");
+  if (declared > TRANSCRIPT_MAX_BYTES) return c.json({ error: "file too large" }, 413);
+  const body = await c.req.arrayBuffer();
+  if (body.byteLength > TRANSCRIPT_MAX_BYTES) return c.json({ error: "file too large" }, 413);
+  const key = `meetings/${id}/transcripts/${name.data}`;
+  const obj = await c.var.env.MEETINGS.put(key, body, { httpMetadata: { contentType: c.req.header("Content-Type") ?? "application/octet-stream" } });
+  log("transcript.put", { meeting: id, key, size: obj.size });
+  return c.json({ key, size: obj.size });
+});
+
 app.post("/api/meetings/:id/end", async (c) => {
   const id = meetingId(c);
   if (!id) return c.json({ error: "bad meeting id" }, 400);
@@ -228,6 +252,50 @@ app.post("/api/meetings/:id/copy", async (c) => {
   if (!r.ok) return c.json({ error: r.error }, r.status);
   log("copy.requested", { meeting: id, files: r.answer.files, copied: r.answer.copies.filter((x) => x.status === "copied").length });
   return c.json(r.answer);
+});
+
+/**
+ * The batch pass, one track per call (docs/BATCH.md): read the track from R2,
+ * hand it to Whisper on Workers AI as base64, answer the model's words. The
+ * CLI (`acta transcribe --engine whisper`) turns them into rows; the same
+ * call can later run from Scribe after a copy lands.
+ */
+app.post("/api/meetings/:id/transcribe", async (c) => {
+  const id = meetingId(c);
+  if (!id) return c.json({ error: "bad meeting id" }, 400);
+  const body = await jsonBody(c, TranscribeBodySchema);
+  const key = `meetings/${id}/recordings/${body.track}`;
+  const obj = await c.var.env.MEETINGS.get(key);
+  if (!obj) return c.json({ error: `no such track: ${body.track}` }, 404);
+  const bytes = await obj.arrayBuffer();
+  const audio = Buffer.from(bytes).toString("base64");
+  const t = Date.now();
+  let raw: unknown;
+  try {
+    raw = await c.var.env.AI.run(WHISPER_MODEL, {
+      audio,
+      task: "transcribe",
+      ...(body.language ? { language: body.language } : {}),
+      ...(body.initialPrompt ? { initial_prompt: body.initialPrompt } : {}),
+      ...(body.vadFilter !== undefined ? { vad_filter: body.vadFilter } : {}),
+      ...(body.conditionOnPreviousText !== undefined ? { condition_on_previous_text: body.conditionOnPreviousText } : {}),
+      ...(body.noSpeechThreshold !== undefined ? { no_speech_threshold: body.noSpeechThreshold } : {}),
+      ...(body.hallucinationSilenceThreshold !== undefined ? { hallucination_silence_threshold: body.hallucinationSilenceThreshold } : {}),
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    log("transcribe.failed", { meeting: id, track: body.track, bytes: bytes.byteLength, ms: Date.now() - t, error: message });
+    return c.json({ error: `workers ai: ${message}` }, 502);
+  }
+  const ms = Date.now() - t;
+  const output = WhisperOutputSchema.safeParse(raw);
+  if (!output.success) {
+    log("transcribe.bad_shape", { meeting: id, track: body.track, ms, keys: raw && typeof raw === "object" ? Object.keys(raw).join(",") : typeof raw });
+    return c.json({ error: `unexpected model output: ${z.prettifyError(output.error)}` }, 502);
+  }
+  log("transcribe.done", { meeting: id, track: body.track, bytes: bytes.byteLength, ms, segments: output.data.segments.length, words: output.data.word_count ?? null });
+  const answer: TranscribeAnswer = { track: body.track, bytes: bytes.byteLength, model: WHISPER_MODEL, ms, output: output.data };
+  return c.json(answer);
 });
 
 // --- the room (cap) ----------------------------------------------------------------------

@@ -159,6 +159,15 @@ one night and only the live API said so).
 
 - Workers AI nova-3: $0.0052 per audio minute batch, $0.0092 over WebSocket
   (10-22). Whisper large-v3-turbo $0.0005. Free tier 10 min/day.
+  *Measured on the account's own analytics (10-23, GraphQL
+  `aiInferenceAdaptiveGroups`):* `@cf/deepgram/nova-3-ws` 836.36 neurons
+  per audio minute = $0.0092; `@cf/openai/whisper-large-v3-turbo` 46.63
+  neurons per audio minute = $0.000513, **billed on the full track
+  duration, not the speech VAD keeps** (9 calls over 201 track-minutes
+  billed 9,326 neurons). The day of the first live meeting billed 319,495
+  nova-3 neurons ($3.51, 382 participant-audio-minutes: meeting 1's 174
+  plus the spike and test meetings) and the free tier is 10,000 neurons a
+  day, not minutes. The numbers in `docs/BATCH.md` are from this.
 - RealtimeKit: audio participant $0.0005/min, audio-only export
   $0.003/min, raw RTP to R2 $0.0005/min; track recording GA 2026-05-28 as one
   WebM per participant; `user_ids` selection early beta; download URLs

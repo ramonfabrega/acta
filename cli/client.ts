@@ -15,6 +15,7 @@ import {
   type Paragraph,
   type WritableBookSectionSchema,
 } from "../src/core/schemas.ts";
+import { TranscribeAnswerSchema, type TranscribeAnswer, type TranscribeBody } from "../src/core/whisper.ts";
 
 export const DEFAULT_URL = "https://acta.ramonfabrega.com";
 export const PASSAGE_ENTRY = "tokens/cloudflare/personal/acta/acta-token";
@@ -54,6 +55,7 @@ export const JoinAnswerSchema = z.object({ token: z.string().min(1), userId: z.s
 export type JoinAnswer = z.infer<typeof JoinAnswerSchema>;
 
 export const PutBookAnswerSchema = z.object({ updatedAt: z.number() }).loose();
+export const PutFileAnswerSchema = z.object({ key: z.string(), size: z.number().int() }).loose();
 export const HealthSchema = z.object({ ok: z.boolean(), version: z.string().optional() }).loose();
 
 /** The JSONL row; `seq` is present when Scribe includes it. */
@@ -180,6 +182,14 @@ export const api = {
   /** `rel` is the key below `meetings/<id>/`; the body streams. */
   file: (id: string, rel: string) =>
     request("GET", `/api/meetings/${enc(id)}/files/${rel.split("/").map(enc).join("/")}`),
+
+  /** A batch transcript (or its run record) into `transcripts/` under the meeting's R2 prefix; the only writable path. */
+  putTranscript: (id: string, name: string, body: string, contentType: string) =>
+    json(PutFileAnswerSchema, "PUT", `/api/meetings/${enc(id)}/files/transcripts/${enc(name)}`, { body, contentType }),
+
+  /** Whisper on Workers AI over one track already in R2 (docs/BATCH.md). Minutes, not seconds: the call lasts a while. */
+  transcribe: (id: string, body: TranscribeBody): Promise<TranscribeAnswer> =>
+    json(TranscribeAnswerSchema, "POST", `/api/meetings/${enc(id)}/transcribe`, { body: JSON.stringify(body), contentType: "application/json" }),
 
   end: async (id: string) => { await request("POST", `/api/meetings/${enc(id)}/end`); },
 
